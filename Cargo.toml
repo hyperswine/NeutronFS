@@ -1,0 +1,22 @@
+[package]
+name = "neutron_fs"
+version = "0.1.0"
+edition = "2021"
+description = "NeutronFS driver and app code"
+
+[[bin]]
+name = "main"
+required-features = ["graphics"]
+
+# for other binary targets, like a command line tool, dont need graphics
+# for library targets, also dont need graphics or any std lib crates
+
+[dependencies]
+dioxus = { version = "0.2.4", features = ["desktop"], optional = true }
+log = "0.4.14"
+simple_logger = "2.1.0"
+
+# LINK DIOXUS TO the BIN TARGET ONLY!
+
+[features]
+graphics = ["dioxus"]

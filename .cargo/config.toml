@@ -1,0 +1,6 @@
+[alias]
+bdriver = "build --lib"
+bapp = "build --bin main --features graphics"
+rapp = "run --bin main --features graphics"
+
+# No need to build-std or core for drivers
