@@ -319,6 +319,7 @@ struct Block {}
 // when reading, dont do anything to the data, just copy it once to RAM
 // and have the kernelmanager/sparx handle concurrency
 
+// on aarch64 and x86, theres a crc32c instruction
 fn compute_crc32c() {}
 
 // uses crc32c backend

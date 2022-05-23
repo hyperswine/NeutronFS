@@ -2,6 +2,9 @@ pub mod frontend;
 
 // * Taken from the file-explorer example
 
+// NOTE: I want a way to walk through a partition using the driver code without std. So std::fs doesnt make sense at all
+// DO NOT IMPORT std::fs here!
+
 use dioxus::prelude::*;
 
 fn main() {
@@ -44,6 +47,7 @@ static App: Component<()> = |cx| {
                         }
                         h1 { "{path_end}" }
                     }
+                    // DISPLAY THE PREVIEW HERE
                 )
             })
             files.read().err.as_ref().map(|err| {
@@ -77,6 +81,9 @@ impl Files {
 
         files
     }
+
+    /// Show a preview of the file (if in ASCII/UTF-8 encoding. If raw/binary, then no preview at all, not even blank)
+    fn preview(&mut self) {}
 
     fn reload_path_list(&mut self) {
         let cur_path = self.path_stack.last().unwrap();
