@@ -2,34 +2,21 @@
 // NEUTRON FILESYSTEM
 // ------------------
 
-// for now
-struct KTimestamp;
-
-// TODO: use neutronapi for common neutron types
-// The neutronkernel api not the userspace api
-
-struct MMIO_API {
-    write_LBA_addr: u64,
-    read_LBA_addr: u64,
-}
-
-impl MMIO_API {
-    fn new(write_LBA_addr: u64, read_LBA_addr: u64) -> Self {
-        Self {
-            write_LBA_addr,
-            read_LBA_addr,
-        }
-    }
-}
-
-// ? query kernel device tree (not firmware) for partition number and extra details
-fn get_mmio_api_from_partition() -> MMIO_API {
-    MMIO_API::new(0, 0)
-}
+/*
+This is the greatest filesystem to ever exist
+*/
 
 // ------------------
+// USE API
+// ------------------
+
+use neutronapi::KTimestamp;
+
+// ------------------
+// CORE STRUCTURES
+// ------------------
+
 // PARTITION METADATA
-// ------------------
 
 type FSUUID = [u8; 16];
 // CRC32
@@ -102,10 +89,6 @@ type NeutronUUID = u64;
 const MAX_FILE_SIZE_BYTES: u64 = 1024_u64.pow(6);
 // TODO: technically, the sector size should be 4KiB. But the 'Node' size should be 16KiB
 const BLOCK_SIZE_BYTES: usize = 4192;
-
-// ------------------
-// Nodes
-// ------------------
 
 type FilePermissions = u16;
 
@@ -311,21 +294,9 @@ impl NeutronFSINode {
 // Logical block / payload of a leaf node
 struct Block {}
 
-// -------------
-// FUNCTIONALITY
-// -------------
-
-// NOTE: copy on write for all write ops
-// when reading, dont do anything to the data, just copy it once to RAM
-// and have the kernelmanager/sparx handle concurrency
-
-// on aarch64 and x86, theres a crc32c instruction
-fn compute_crc32c() {}
-
-// uses crc32c backend
-fn generate_checksum256() {}
-
-// DISK FUNCTIONALITY
+// -------------------
+// INTERNAL API
+// -------------------
 
 // being used
 fn delete_extent_block(block_addr: u64) {}
@@ -340,11 +311,24 @@ fn assign_blocks(n: usize) {
 }
 
 // -------------
-// Driver API
+// SUPPORT FUNCTIONS
 // -------------
 
-// NeutronFSDriver should use these functions/expose them to KernelManager
-// and VFS
+// NOTE: copy on write for all write ops
+// when reading, dont do anything to the data, just copy it once to RAM
+// and have the kernelmanager/sparx handle concurrency
+
+// on aarch64 and x86, theres a crc32c instruction
+fn compute_crc32c() {}
+
+// uses crc32c backend
+fn generate_checksum256() {}
+
+// -------------
+// SYSTEM API
+// -------------
+
+// NeutronFSDriver should mostly reexport these functions to VFS
 
 // 2 pages
 const DEFAULT_FILE_SIZE_ON_DISK: u64 = 8192;
@@ -384,3 +368,31 @@ fn write_to_file(file_path: &str, data: &[u8]) {}
 // new file path must be correct
 // also works for dirs
 fn move_file(curr_file_path: &str, new_file_path: &str) {}
+
+// ---------------
+// MMIO API
+// ---------------
+
+// on a neutron system, MMIO might be used
+// either ACPI or DTB can be used to target the disk and prob partition of interest
+// the MMIO controller for the pcie ssd should redir all reads/writes to a specific physical ranges to the PCI BAR
+// you need to know how to interact with the PCI BAR. It will tell you the type of device and its functions. And possibly how to use them. Some device memory could prob completely mapped to memory (IOMMU). But it will be virtual
+
+struct MMIO_API {
+    write_LBA_addr: u64,
+    read_LBA_addr: u64,
+}
+
+impl MMIO_API {
+    fn new(write_LBA_addr: u64, read_LBA_addr: u64) -> Self {
+        Self {
+            write_LBA_addr,
+            read_LBA_addr,
+        }
+    }
+}
+
+// query kernel device tree (not firmware) for partition number and extra details
+fn get_mmio_api_from_partition() -> MMIO_API {
+    MMIO_API::new(0, 0)
+}

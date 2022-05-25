@@ -12,9 +12,14 @@ required-features = ["graphics"]
 # for library targets, also dont need graphics or any std lib crates
 
 [dependencies]
+neutronapi = { git = "https://github.com/hyperswine/neutronapi", features = [
+    "types",
+    "interface",
+] }
 dioxus = { version = "0.2.4", features = ["desktop"], optional = true }
 log = "0.4.14"
 simple_logger = "2.1.0"
+bincode = { version = "2.0.0-rc.1", default-features = false, features = ["derive", "alloc"] }
 
 # LINK DIOXUS TO the BIN TARGET ONLY!
 
