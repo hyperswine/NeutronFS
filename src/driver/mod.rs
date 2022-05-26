@@ -4,12 +4,15 @@
 
 /*
 This is the greatest filesystem to ever exist
+Example fs in example_fs. If single user, then /home is the only home
+If "multiuser", other homes are in /home/guest/<name>
 */
 
 // ------------------
 // USE API
 // ------------------
 
+use bincode::{config, Encode};
 use neutronapi::KTimestamp;
 
 // ------------------
@@ -18,9 +21,13 @@ use neutronapi::KTimestamp;
 
 // PARTITION METADATA
 
+// assumes SSD sector size = page size
+// = 4K by default
+const DISK_SECTOR_SIZE: usize = 4096;
+
 type FSUUID = [u8; 16];
-// CRC32
-type Checksum256 = [u8; 256];
+// CRC32C
+type Checksum32 = u32;
 
 const SUPERBLOCK_PRIMARY_PLACEMENT: u64 = 0x10_000;
 const SUPERBLOCK_SECONDARY_PLACEMENT: u64 = 0x20_000;
@@ -30,14 +37,19 @@ const SUPERBLOCK_TERTIARY_PLACEMENT: u64 = 0x30_000;
 // should be exactly 65536 Bytes. So 256 256-blocks for CRC32C or SHA-2 (slower)
 #[repr(C)]
 struct Superblock {
-    checksum: Checksum256,
+    checksum: Checksum32,
+    // mostly for EFI support and quick search. Add to GPT entry
     fs_uuid: FSUUID,
+    // label for the partition, max 256B name, like "Extras" or "Main". On Neutron, the default label for rootfs is "Main"
+    label: [u8; 0x100],
     // on disk LBA of the start of this block
     physical_addr: u64,
-    flags: u64,
+    // flags: u64,
     // technically just 8 ASCII bytes, should be "__NeFS__"
     // unless its an extension or modified version of NeFS
     magic: u64,
+    // quite important. Basically refers to the transaction number that generated this block (CoW)
+    // if things dont match up, there may have been a phantom write so you dont have to find and update the parent node
     generation: u64,
 
     // ROOT POINTERS
@@ -59,42 +71,45 @@ struct Superblock {
     sector_size: u32,
     node_size: u32,
     leaf_size: u32,
+    // RAID? Should just be total_bytes or 0/1
     stripe_size: u32,
     // size of a single chunk (array of chunks)
     system_chunk_array_size: u32,
 
-    // OTHER
+    // NOTE: the generation of each subtree is stored
     chunk_root_generation: u64,
-    compatibility_flags: u64,
-    compatibility_read_only_flags: u64,
-    incompatibility_flags: u64,
-    // should be CRC32C
-    checksum_type: u16,
+    cache_generation: u64,
+    uuid_tree_generation: u64,
+
+    // OTHER
+    // compatibility_flags: u64,
+    // compatibility_read_only_flags: u64,
+    // incompatibility_flags: u64,
+    // should be CRC32C always
+    // checksum_type: u16,
+
+    // ROOT DATA
     root_level: u8,
     chunk_root_level: u8,
     dev_item: [u8; 0x62],
-    // label for the partition
-    label: [u8; 0x100],
-    cache_generation: u64,
-    uuid_tree_generation: u64,
-    reserved: [u8; 0xF0],
     sys_chunk_array: [u8; 0x800],
     super_roots: [u8; 0x2A0],
-    unused: [u8; 0x235],
+    // reserved: [u8; 0xF0],
+    // No need to waste space. Although aligning it to page size isnt that bad of an idea
+    // unused: [u8; 0x235],
 }
 
 // there can be 1.8 quintillion users
-type NeutronUUID = u64;
+// Its stored as a separate config in sys/users if multi usermode is turned on
+// type NeutronUUID = u64;
 
 const MAX_FILE_SIZE_BYTES: u64 = 1024_u64.pow(6);
-// TODO: technically, the sector size should be 4KiB. But the 'Node' size should be 16KiB
-const BLOCK_SIZE_BYTES: usize = 4192;
+const BLOCK_SIZE_BYTES: usize = 4096;
 
 type FilePermissions = u16;
 
 // not to be confused with dir item, when you know the node is a dir
 // all NeutronItem must have a NeutronItemType
-// TODO: could just make this a trait and just do the vital types
 enum NeutronItemType {
     // Vital type
     InodeItem,
@@ -128,15 +143,15 @@ enum NeutronItemType {
 }
 
 struct NeutronFSNodeHeader {
-    checksum: Checksum256,
+    checksum: Checksum32,
     fs_uuid: FSUUID,
     logical_address: u64,
-    flags: [u8; 7],
+    // flags: [u8; 7],
     // should be 1 for new filesystems otherwise 0 for an old filesystem
     back_reference: u8,
     chunk_tree_uuid: FSUUID,
-    // ? the generation of the header
-    generation: u64,
+    // I think this is the generation of the header. I dont need
+    // generation: u64,
     id_of_parent: u64,
     number_of_child_items: u32,
     // 0 = leaf, I think also includes core root nodes
@@ -145,10 +160,10 @@ struct NeutronFSNodeHeader {
 
 // yyyy-mm--ddThh:mm:ss + nanosecs
 // prob not that accurate anyway due to hardware latency
-struct UnixTime {
-    seeconds_since_epoch: u64,
-    nanoseconds: u32,
-}
+// struct UnixTime {
+//     seeconds_since_epoch: u64,
+//     nanoseconds: u32,
+// }
 
 struct NeutronFSKey {
     object_id: u64,
@@ -210,17 +225,24 @@ struct NeutronFSInodeRef {
 }
 
 // A type of Node that describes a file
+// just needs to contain the Metadata struct for rust/rei. Note, time is in Minima time, "dd-mm-yyyy hh:mm:ss:mm:nn" or amount of nanoseconds since 12000BC or 300K years ago stored as a u128
 // https://btrfs.wiki.kernel.org/index.php/Data_Structures#btrfs_inode_item
 #[repr(C, packed)]
 struct NeutronFSINode {
     // ------USER INFO------
-    creator_id: NeutronUUID,
-    owner_id: NeutronUUID,
+    // THIS DATA IS STORED IN /sys/users if multiuser mode is on. It basically mirrors the RootFS tree and overrides any supported FS mounts permissions unless override_permissions: false
+    // creator_id: NeutronUUID,
+    // owner_id: NeutronUUID,
     // d-rwx-rwx-rwx (10 bits, 6 bits empty)
-    permissions: FilePermissions,
+    // permissions: FilePermissions,
     // ------FLAGS------
+    // I think generation time here
+    generation: u64,
+    // a user file can be made readonly for safety reasons. system_use may or may not be read_only, but can only be interacted with kernel code or privileged access
     rd_only: bool,
     hidden: bool,
+    // A file that is not meant for generic use
+    // I guess could also be stored in /sys/fs
     system_use: bool,
     // if 1, then back it up
     needs_to_be_backed_up: bool,
@@ -246,50 +268,14 @@ struct NeutronFSINode {
     max_size: u64,
 }
 
-// just needs to contain the stat struct https://linux.die.net/man/2/stat
-impl NeutronFSINode {
-    fn new(
-        creator_id: NeutronUUID,
-        owner_id: NeutronUUID,
-        permissions: FilePermissions,
-        rd_only: bool,
-        hidden: bool,
-        system_use: bool,
-        needs_to_be_backed_up: bool,
-        is_ascii: bool,
-        allow_random_access: bool,
-        locked: bool,
-        bytes_per_record: u64,
-        offset_of_key: u64,
-        key_length: u64,
-        creation_time: KTimestamp,
-        last_accessed: KTimestamp,
-        last_changed: KTimestamp,
-        curr_size: u64,
-        max_size: u64,
-    ) -> Self {
-        Self {
-            creator_id,
-            owner_id,
-            permissions,
-            rd_only,
-            hidden,
-            system_use,
-            needs_to_be_backed_up,
-            is_ascii,
-            allow_random_access,
-            locked,
-            bytes_per_record,
-            offset_of_key,
-            key_length,
-            creation_time,
-            last_accessed,
-            last_changed,
-            curr_size,
-            max_size: MAX_FILE_SIZE_BYTES,
-        }
-    }
-}
+// calculation of Maxima Time:
+/*
+X nanoseconds since 300K years ago
+X/1000 microsec/1000 sec/60 min/24 hr/365 days
+(+ extra leap years)
+
+Result = "dd-mm-yyyy hh:mm:ss:mm:nn"
+*/
 
 // Logical block / payload of a leaf node
 struct Block {}
@@ -297,6 +283,10 @@ struct Block {}
 // -------------------
 // INTERNAL API
 // -------------------
+
+// for a single partition, containing the structs and refs? You have to build it though. Just dont build the extent tree
+
+// good idea to just map the entire rootfs subvolume into memory
 
 // being used
 fn delete_extent_block(block_addr: u64) {}
@@ -319,10 +309,49 @@ fn assign_blocks(n: usize) {
 // and have the kernelmanager/sparx handle concurrency
 
 // on aarch64 and x86, theres a crc32c instruction
-fn compute_crc32c() {}
+// if not available, use the "soft" solution
+fn compute_crc32c(input: &[u8]) -> u32 {
+    let mut crc32: u32 = 0xFFFF_FFFF;
+    let crc_table = [0 as u32; 256];
 
-// uses crc32c backend
-fn generate_checksum256() {}
+    for byte in input {
+        // I hope the cast is right (00001111 => 00000000.... 00001111)
+        let ind: usize = ((crc32 ^ *byte as u32) & 0xFF).try_into().unwrap();
+        crc32 = (crc32 >> 8) ^ crc_table[ind];
+    }
+
+    crc32 ^ 0xFFFF_FFFF
+}
+
+// uses crc32c backend. Note requires alloc prob, unless maybe I dont resize?
+/// Just serialises the data into bytes. And computes CRC32C for it
+/// in: T: Encode
+/// out: Checksum32
+fn generate_checksum32<T: Encode>(encodable_struct: T) -> Checksum32 {
+    // serialise
+    let res = bincode::encode_to_vec(
+        encodable_struct,
+        config::standard()
+            .with_little_endian()
+            .write_fixed_array_length()
+            .with_variable_int_encoding(),
+    );
+
+    let res = match res {
+        Ok(r) => r,
+        Err(_) => panic!("Something went wrong with serialising to bytes"),
+    };
+
+    compute_crc32c(&res)
+}
+
+fn verify_checksum32(input: Checksum32) -> bool {
+    if input == 0x0 {
+        true
+    } else {
+        false
+    }
+}
 
 // -------------
 // SYSTEM API
