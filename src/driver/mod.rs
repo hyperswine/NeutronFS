@@ -15,6 +15,8 @@ If "multiuser", other homes are in /home/guest/<name>
 use bincode::{config, Encode};
 use neutronapi::KTimestamp;
 
+pub mod skiplist;
+
 // ------------------
 // CORE STRUCTURES
 // ------------------
