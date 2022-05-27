@@ -55,9 +55,11 @@ struct Superblock {
     generation: u64,
 
     // ROOT POINTERS
+    // logical addr, which should be converted to physical addr by adding it to the physical_addr
     core_tree_root_logical_addr: u64,
     chunk_tree_root_logical_addr: u64,
     log_tree_root_logical_addr: u64,
+
     // transaction id for log root
     log_root_transaction_id: u64,
 

@@ -13,6 +13,12 @@
 
 // put other metadata in a raw file /sys/fs/meta.raw
 
+// CoW?
+// IDK I think we can implement something like that
+// CoW is great for snapshotting. Just add an extra ref or dont deref it
+// for data area only. Somehow, where you have sub skip lists as well
+// I think you can just use ref counts. Both trees point to the same subvolume tree
+
 // -------------
 // USES
 // -------------
@@ -37,16 +43,16 @@ pub struct HeadNode {
     n_levels: u64,
     // should be n_levels long
     // each level points to the next one with the same level available
-    nodes: Vec<Node>,
+    nodes: Vec<INode>,
 }
 
 impl HeadNode {
-    pub fn new(n_levels: u64, nodes: Vec<Node>) -> Self {
+    pub fn new(n_levels: u64, nodes: Vec<INode>) -> Self {
         Self { n_levels, nodes }
     }
 
     // search for a value (inode number). And maybe return a ref to that node
-    pub fn search(&mut self, val: u64) -> Option<&Node> {
+    pub fn search(&mut self, val: u64) -> Option<&INode> {
         let mut curr_node = &self.nodes[self.n_levels as usize - 1];
 
         // for each level, compare
@@ -82,16 +88,21 @@ impl HeadNode {
     pub fn remove_node(&mut self, val: u64) {}
 }
 
+pub const MAX_LEVELS: usize = SECTOR_SIZE as usize - 1;
+
 // a node has n levels
+// a node should be a single page at most with its data section. There can be at most 4096 - 1 levels
+/// Inode = Index Node
 #[repr(C, packed)]
 #[derive(Debug, Encode, Decode)]
-pub struct Node {
+pub struct INode {
     value: u64,
-    next_nodes: Vec<Node>,
+    // its actual data (pointers to chunks) is also a skiplist
+    next_nodes: Vec<INode>,
 }
 
-impl Node {
-    pub fn new(value: u64, next_nodes: Vec<Node>) -> Self {
+impl INode {
+    pub fn new(value: u64, next_nodes: Vec<INode>) -> Self {
         Self { value, next_nodes }
     }
 
@@ -102,6 +113,31 @@ impl Node {
     // methods to point to a new node for a certain level
 
     // idk if recursive search or bottom up. I think just iterative on the main
+}
+
+// to find a specific block of a specific file: (logn)^2
+// to find k specific blocks of a specific file: k(logn)^2. Good if not as fragmented so we can allocate large cont sectors from the free area (free list)
+
+// it points to an offset
+#[repr(C, packed)]
+#[derive(Debug, Encode, Decode)]
+pub struct DataNode {
+    offset: u64,
+    next_nodes: Vec<DataNode>,
+}
+
+// at most 2^64 clusters?
+// cluster number is used:
+// physical addr = physical_offset_of_parition + cluster_area_offset + cluster_number * cluster_size
+
+/// Always adds LIFO (inserts at the front)
+/// could prob be very fragmented
+/// Maybe could also be a skip list
+#[repr(C, packed)]
+#[derive(Debug, Encode, Decode)]
+pub struct FreeClusterNode {
+    cluster_number: u64,
+    next_nodes: Vec<FreeClusterNode>,
 }
 
 // -----------------
