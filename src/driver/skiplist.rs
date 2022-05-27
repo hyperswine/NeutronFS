@@ -18,6 +18,20 @@
 // CoW is great for snapshotting. Just add an extra ref or dont deref it
 // for data area only. Somehow, where you have sub skip lists as well
 // I think you can just use ref counts. Both trees point to the same subvolume tree
+// basically, each data cluster has a ref count. We can dealloc a data cluster when rc = 0. We have to do with in software by keeping track of currently allocated blocks
+
+// i feel like its not that big of a deal to "steal" more blocks next to you. Or maybe just store the offset of the next block at the last entry (like a linked list) if you really need more block entries. At that point its prob a fragmentation issue and you should consider defragging
+
+/*
+When to flush changes:
+1. create a new file
+2. delete a file
+3. move a file (such that directory links change)
+*/
+
+// how are children stored in a dir
+// just a list of inode numbers. Technically can be as long as it needs to be
+// have to search the inode table like k times for a file depth of k. It might be possible cache recently accessed inodes as well with LRU (on another thread)
 
 // -------------
 // USES
@@ -38,7 +52,6 @@ use rand_mt::Mt19937GenRand64;
 
 #[repr(C, packed)]
 #[derive(Debug, Encode, Decode)]
-
 pub struct HeadNode {
     n_levels: u64,
     // should be n_levels long
@@ -97,18 +110,31 @@ pub const MAX_LEVELS: usize = SECTOR_SIZE as usize - 1;
 #[derive(Debug, Encode, Decode)]
 pub struct INode {
     value: u64,
+    data: Vec<DataNode>,
     // its actual data (pointers to chunks) is also a skiplist
     next_nodes: Vec<INode>,
 }
 
 impl INode {
-    pub fn new(value: u64, next_nodes: Vec<INode>) -> Self {
-        Self { value, next_nodes }
+    pub fn new(value: u64, data: Vec<DataNode>, next_nodes: Vec<INode>) -> Self {
+        Self {
+            value,
+            data,
+            next_nodes,
+        }
     }
 
     pub fn val(&self) -> u64 {
         self.value
     }
+
+    // best idea for most small-med range sized files
+    // returns it all as a contiguous chunk of bytes
+    pub fn get_all_data(&mut self) {}
+
+    // returns one or more blocks depending on the offset and size you want
+    // more efficient for bigger files
+    pub fn get_data(&mut self) {}
 
     // methods to point to a new node for a certain level
 
@@ -140,12 +166,34 @@ pub struct FreeClusterNode {
     next_nodes: Vec<FreeClusterNode>,
 }
 
+impl FreeClusterNode {
+    pub fn new(cluster_number: u64, next_nodes: Vec<FreeClusterNode>) -> Self {
+        Self {
+            cluster_number,
+            next_nodes,
+        }
+    }
+}
+
 // -----------------
 // INTERNAL API
 // -----------------
 
 const SECTOR_SIZE: u64 = 4096;
 const PAGE_SIZE: u64 = 4096;
+
+pub struct ReadQueue {
+    // want to read these blocks
+    queue: Vec<u64>,
+}
+
+// assume you can only submit 4K read requests at a time
+// and receive a 4K block back, sometime later
+// for now its quite good
+pub fn push_read_request(cluster_number: u64) {}
+
+// before attempting to read that block, check if its already in memory
+// IDK i think i should have an internal struct and an in memory struct
 
 // -----------------
 // USER API
