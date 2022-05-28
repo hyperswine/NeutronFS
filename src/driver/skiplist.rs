@@ -47,15 +47,25 @@ use rand_mt::Mt19937GenRand64;
 // TYPE INTERFACE
 // -------------
 
-pub const DEFAULT_FS_NODE_SIZE: u16 = u16::MAX;
+/// 64K for a single leaf node (at least in the fs)
+pub const DEFAULT_LEAF_NODE_SIZE: u16 = u16::MAX;
+/// Prob 32B at most
+pub const DEFAULT_INTERNAL_NODE_SIZE: u8 = u8::MAX;
 
 pub const SECTOR_SIZE: u64 = 4096;
 pub const PAGE_SIZE: u64 = 4096;
 
 pub const MAX_LEVELS: usize = SECTOR_SIZE as usize - 1;
 
+// BTW we prob dont need too many blocks. If we're seeing that we're running out of contiguous free blocks, defragment right away
+// So we can maybe just have a list of 100 u64 entries at most or something. Right now we can have at most 64K/8 = 8192 data list entries
+// From 16 pages per leaf node to 1 where we have 512B
+
+/// Actual driver lookup media number
 pub type ClusterNumber = u64;
+/// Key numbers to sort lists
 pub type InodeNumber = u64;
+pub type DataNodeNumber = u64;
 
 // node size / entry size, prob like 2 pages
 pub const MAX_DATA_NODES: u64 = 8192;
@@ -73,7 +83,7 @@ pub struct Align4096<T>(T);
 
 /// Core metadata of the fs in memory
 /// On disk, uses a subset of these (implemented by method to_disk_format())
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Debug, Encode, Decode)]
 pub struct SuperBlock {
     // AUTHENTICITY OF FS
@@ -125,7 +135,7 @@ pub struct LeafNodeData {
     // search the data skiplist for the nodes
     // usually only MAX_DATA_NODES allowed
     // each data skiplistnode
-    data_nodes: u64,
+    data_nodes: Vec<u64>,
 }
 
 pub enum Inode {
@@ -136,6 +146,7 @@ pub enum Inode {
 
 impl Inode {
     /// Given inode number I, find its associated cluster number C
+    /// Its the lower level driver's job to find that cluster in the physical media and access its data in a safe way
     pub fn find_inode_cluster_number(
         &self,
         inode_number: InodeNumber,
@@ -166,10 +177,34 @@ impl Inode {
     }
 }
 
+// All a data node is is some reference to a contiguous sector of data
+// It stores the cluster number of that data (in the cluster data area)
+// And the cont size of that data
+
+/// Each data node must refer to a cont block of allocated clusters
+#[repr(C)]
+#[derive(Debug, Encode, Decode)]
+pub struct DataNode {
+    clusters_used: u64,
+    cluster_start_number: ClusterNumber,
+}
+
+impl DataNode {
+    pub fn new(clusters_used: u64, cluster_start_number: ClusterNumber) -> Self {
+        Self {
+            clusters_used,
+            cluster_start_number,
+        }
+    }
+}
+
+/// Access a cluster number
+pub fn access_cluster(cluster_number: ClusterNumber) {}
+
 /// Always adds LIFO (inserts at the front)
 /// could prob be very fragmented
 /// Maybe could also be a skip list
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Debug, Encode, Decode)]
 pub struct FreeClusterNode {
     cluster_number: u64,
@@ -201,7 +236,9 @@ pub fn push_read_request(cluster_number: u64) {}
 // -----------------
 
 pub fn add_node() {
-    // use mt
+    // use mt. NOTE: some arm chips have a trustzone subsystem for generating random numbers
+    // riscv too. We'll need a driver for those to generate values
+    // another way is to slice the 64-bit generated number up into 8 chunks and check each one %2 break if 0 right away or go next if all 8 are 1
     let mut mt = Mt19937GenRand64::new_unseeded();
     let mut level = 0;
 
