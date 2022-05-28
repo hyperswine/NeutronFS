@@ -28,14 +28,68 @@ use bincode::{Decode, Encode};
 use rand_mt::Mt19937GenRand64;
 
 // -------------
+// TYPE INTERFACE
+// -------------
+
+pub const DEFAULT_FS_NODE_SIZE: u16 = u16::MAX;
+
+pub const SECTOR_SIZE: u64 = 4096;
+pub const PAGE_SIZE: u64 = 4096;
+
+pub const MAX_LEVELS: usize = SECTOR_SIZE as usize - 1;
+
+// -------------
 // IN MEMORY STRUCTURES
 // -------------
+
+pub type FSUUID = [u8; 16];
+pub type Checksum32 = u32;
+
+/// Use this to align the data correctly in memory before writing to disk
+#[repr(align(4096))]
+pub struct Align4096<T>(T);
+
+/// Core metadata of the fs in memory
+/// On disk, uses a subset of these (implemented by method to_disk_format())
+#[repr(C, packed)]
+#[derive(Debug, Encode, Decode)]
+pub struct SuperBlock {
+    // AUTHENTICITY OF FS
+    magic: u64,
+    fs_uuid: FSUUID,
+
+    // INTEGRITY
+    checksum: Checksum32,
+
+    // LABELS
+    label: [u8; 0x100],
+    generation: u64,
+
+    // OFFSETS
+    physical_addr_of_partition: u64,
+    core_fs_skiplist_addr: u64,
+    free_cluster_list_addr: u64,
+
+    // TOTAL SIZES
+    n_sectors_total: u64,
+    n_sectors_used: u64,
+
+    // FEATURE SIZE
+    sector_size_bytes: u16,
+    fs_node_size_bytes: u16,
+}
+
+/*
+We want it to be able to be empty. So Option<> maybe
+We also dont need a root list per se. We can just cache the n levels per inode so we dont have to call .len() each time
+*/
 
 #[repr(C, packed)]
 #[derive(Debug, Encode, Decode)]
 pub struct RootList {
     n_inode_levels: u64,
     // each level points to the next one with the same level available
+    // will have to alloc quite a bit more data for this. All we need is .next() and .down()
     inodes: Vec<INode>,
 }
 
@@ -83,8 +137,6 @@ impl RootList {
     /// Gets rid of a node
     pub fn remove_node(&mut self, val: u64) {}
 }
-
-pub const MAX_LEVELS: usize = SECTOR_SIZE as usize - 1;
 
 /// Inode = Index Node
 #[repr(C, packed)]
@@ -152,9 +204,6 @@ impl FreeClusterNode {
 // -----------------
 // INTERNAL API
 // -----------------
-
-const SECTOR_SIZE: u64 = 4096;
-const PAGE_SIZE: u64 = 4096;
 
 pub struct ReadQueue {
     // want to read these blocks
