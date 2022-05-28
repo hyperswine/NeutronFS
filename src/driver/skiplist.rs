@@ -54,6 +54,12 @@ pub const PAGE_SIZE: u64 = 4096;
 
 pub const MAX_LEVELS: usize = SECTOR_SIZE as usize - 1;
 
+pub type ClusterNumber = u64;
+pub type InodeNumber = u64;
+
+// node size / entry size, prob like 2 pages
+pub const MAX_DATA_NODES: u64 = 8192;
+
 // -------------
 // IN MEMORY STRUCTURES
 // -------------
@@ -95,56 +101,69 @@ pub struct SuperBlock {
     fs_node_size_bytes: u16,
 }
 
-pub type ClusterNumber = u64;
-pub type InodeNumber = u64;
-
-/// Inode = Index Node
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Debug, Encode, Decode)]
-pub struct INode {
+pub struct InternalNodeData {
+    // maybe a level?
+    level: u64,
     value: InodeNumber,
     cluster_number: ClusterNumber,
-    // when converting to disk form, it has be table-cluster based rather than 'tree' based. The data is serialised into bytes like usual with or without compression
-    // only level 0 has a data node, maybe use an enum for it
-    data: DataNode,
-    // its actual data (pointers to chunks) is also a skiplist
-    // go to the cluster and read N bytes for cluster/sector size
     next_node: ClusterNumber,
     lower_node: ClusterNumber,
 }
 
-// node size / entry size, prob like 2 pages
-pub const MAX_DATA_NODES: u64 = 8192;
-
 #[repr(C)]
 #[derive(Debug, Encode, Decode)]
-pub enum Inode {
-    // level > 0
-    InternalNode {
-        value: InodeNumber,
-        cluster_number: ClusterNumber,
-        next_node: ClusterNumber,
-        lower_node: ClusterNumber,
-    },
-    LeafNode {
-        // always level 0
-        // next in the chain
-        next_node: ClusterNumber,
-        // actual data
-        offset: u64,
-        // search the data skiplist for the nodes
-        // usually only MAX_DATA_NODES allowed
-        // each data skiplistnode
-        data_nodes: u64,
-    },
+pub struct LeafNodeData {
+    // NOTE: always level 0
+    // next in the chain
+    value: InodeNumber,
+    cluster_number: ClusterNumber,
+    next_node: ClusterNumber,
+    // actual data
+    offset: u64,
+    // search the data skiplist for the nodes
+    // usually only MAX_DATA_NODES allowed
+    // each data skiplistnode
+    data_nodes: u64,
 }
 
-// it points to an offset
-#[repr(C, packed)]
-#[derive(Debug, Encode, Decode)]
-pub struct DataNode {
-    offset: u64,
-    next_nodes: Vec<DataNode>,
+pub enum Inode {
+    // level > 0
+    InternalNode(InternalNodeData),
+    LeafNode(LeafNodeData),
+}
+
+impl Inode {
+    /// Given inode number I, find its associated cluster number C
+    pub fn find_inode_cluster_number(
+        &self,
+        inode_number: InodeNumber,
+    ) -> Result<ClusterNumber, ClusterNumber> {
+        match self {
+            Inode::InternalNode(i) => {
+                if inode_number == i.value {
+                    return Ok(i.cluster_number);
+                }
+                // <, return return the cluster number of the next one
+                else if inode_number < i.value {
+                    return Err(i.lower_node);
+                }
+                // >
+                else {
+                    return Err(i.next_node);
+                }
+            }
+            // either return or go next
+            Inode::LeafNode(l) => {
+                if inode_number == l.value {
+                    return Ok(l.cluster_number);
+                } else {
+                    return Err(l.next_node);
+                }
+            }
+        }
+    }
 }
 
 /// Always adds LIFO (inserts at the front)
