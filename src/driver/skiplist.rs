@@ -48,18 +48,14 @@ use rand_mt::Mt19937GenRand64;
 // -------------
 
 /// 64K for a single leaf node (at least in the fs)
-pub const DEFAULT_LEAF_NODE_SIZE: u16 = u16::MAX;
-/// Prob 32B at most
-pub const DEFAULT_INTERNAL_NODE_SIZE: u8 = u8::MAX;
+pub const DEFAULT_LEAF_NODE_SIZE: u16 = 4096;
+/// Internal nodes are literally 40 bytes or something
+pub const DEFAULT_INTERNAL_NODE_SIZE: u8 = 40;
 
 pub const SECTOR_SIZE: u64 = 4096;
 pub const PAGE_SIZE: u64 = 4096;
 
 pub const MAX_LEVELS: usize = SECTOR_SIZE as usize - 1;
-
-// BTW we prob dont need too many blocks. If we're seeing that we're running out of contiguous free blocks, defragment right away
-// So we can maybe just have a list of 100 u64 entries at most or something. Right now we can have at most 64K/8 = 8192 data list entries
-// From 16 pages per leaf node to 1 where we have 512B
 
 /// Actual driver lookup media number
 pub type ClusterNumber = u64;
@@ -198,8 +194,42 @@ impl DataNode {
     }
 }
 
-/// Access a cluster number
-pub fn access_cluster(cluster_number: ClusterNumber) {}
+type ClusterData = [u8; PAGE_SIZE as usize];
+
+/// A type that impls Read should be a file like type
+/// that starts at its starting offset
+pub trait Read {
+    // e.g. [u8; 4096]. Should be moved across memory or from disk to buffer
+    // to dual copy, use .clone()
+    type Res;
+
+    // a source S, which is either a trait or something else
+    // defaultly used function
+    fn read_from_source(&self, offset: u64, n_bytes: u64) -> Self::Res;
+}
+
+/// Access a cluster number to get the data
+pub fn access_cluster<R: Read<Res = ClusterData>>(
+    cluster_number: ClusterNumber,
+    feature_offset: u64,
+    reader: R,
+) -> ClusterData {
+    // use the Reader R
+    // a starting offset may or may not be given. May be always just pass the partition reader and the feature offset. The cluster number is also an offset
+    // if starting at the beginning, feature_offset = 0
+    let mut actual_offset = cluster_number * PAGE_SIZE;
+    actual_offset += feature_offset;
+
+    // where Res: ClusterData
+
+    let res = reader.read_from_source(actual_offset, 4096);
+
+    // read from R at feature_offset and 4096 Bytes
+    // NOTE: in memory, we can just copy() the data For actual disk io, you need the MMIO API which prob involves core::ptr::read/write. Just need to pass the struct that implements Read here
+
+    // [0 as u8; 4096]
+    res
+}
 
 /// Always adds LIFO (inserts at the front)
 /// could prob be very fragmented
@@ -223,6 +253,18 @@ impl FreeClusterNode {
 // -----------------
 // INTERNAL API
 // -----------------
+
+pub struct MemReader4096;
+
+impl Read for MemReader4096 {
+    type Res = [u8; 4096];
+
+    fn read_from_source(&self, offset: u64, n_bytes: u64) -> Self::Res {
+        // do a copy() from the source page
+
+        [0 as u8; 4096]
+    }
+}
 
 pub struct ReadQueue {
     // want to read these blocks
