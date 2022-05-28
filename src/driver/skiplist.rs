@@ -33,6 +33,28 @@ When to flush changes:
 // just a list of inode numbers. Technically can be as long as it needs to be
 // have to search the inode table like k times for a file depth of k. It might be possible cache recently accessed inodes as well with LRU (on another thread)
 
+// a node has n levels
+// a node should be a single page at most with its data section. There can be at most 4096 - 1 levels
+
+// in memory structures are converted into in-struct structures
+// via the MMIO API and special convert() methods that extracts the needed info
+// and serialises it into bytes to be written to a new disk
+// On updates, write_update() methods target the specific page on disk and writes the new data to it
+// that is very different to the in memory API where we're mostly dealing with
+
+// each node should 'own' the next
+// its possible to just use references or ARC
+// but for now
+
+/*
+How to write data to the in memory list:
+like git, we have to make a commit that makes an atomic set of changes that can be referenced by a hash
+
+when we save new data to a file, we are basically changing that file's VirtualFile.vec by pushing new data into it. This new data can be represented by a Patch struct, which is basically a diff file meant to be applied to a single file via the userspace API or something
+
+you have to convert that patchfile into a per-block patch file I think. I think the SSD should be smart enough to not "change existing bytes if they are the same". But the smallest thing you can request is an entire page right. So the SSD has to figure out what bytes need to be changed and make the call to the microcontroller to change those specific bytes via byte addressing?
+*/
+
 // -------------
 // USES
 // -------------
@@ -43,33 +65,28 @@ use bincode::{Decode, Encode};
 use rand_mt::Mt19937GenRand64;
 
 // -------------
-// STRUCTURES
+// IN MEMORY STRUCTURES
 // -------------
-
-// each node should 'own' the next
-// its possible to just use references or ARC
-// but for now
 
 #[repr(C, packed)]
 #[derive(Debug, Encode, Decode)]
-pub struct HeadNode {
-    n_levels: u64,
-    // should be n_levels long
+pub struct RootList {
+    n_inode_levels: u64,
     // each level points to the next one with the same level available
-    nodes: Vec<INode>,
+    inodes: Vec<INode>,
 }
 
-impl HeadNode {
-    pub fn new(n_levels: u64, nodes: Vec<INode>) -> Self {
-        Self { n_levels, nodes }
+impl RootList {
+    pub fn new(n_inode_levels: u64, inodes: Vec<INode>) -> Self {
+        Self { n_inode_levels, inodes }
     }
 
     // search for a value (inode number). And maybe return a ref to that node
     pub fn search(&mut self, val: u64) -> Option<&INode> {
-        let mut curr_node = &self.nodes[self.n_levels as usize - 1];
+        let mut curr_node = &self.inodes[self.n_inode_levels as usize - 1];
 
         // for each level, compare
-        for level in 0..self.n_levels as usize {
+        for level in 0..self.n_inode_levels as usize {
             // idk if packed stuff will work properly
             // maybe we implement packed when we write and depack when we go into memory
             let mut next = &curr_node.next_nodes[level];
@@ -103,8 +120,6 @@ impl HeadNode {
 
 pub const MAX_LEVELS: usize = SECTOR_SIZE as usize - 1;
 
-// a node has n levels
-// a node should be a single page at most with its data section. There can be at most 4096 - 1 levels
 /// Inode = Index Node
 #[repr(C, packed)]
 #[derive(Debug, Encode, Decode)]
@@ -140,9 +155,6 @@ impl INode {
 
     // idk if recursive search or bottom up. I think just iterative on the main
 }
-
-// to find a specific block of a specific file: (logn)^2
-// to find k specific blocks of a specific file: k(logn)^2. Good if not as fragmented so we can allocate large cont sectors from the free area (free list)
 
 // it points to an offset
 #[repr(C, packed)]
@@ -187,13 +199,7 @@ pub struct ReadQueue {
     queue: Vec<u64>,
 }
 
-// assume you can only submit 4K read requests at a time
-// and receive a 4K block back, sometime later
-// for now its quite good
 pub fn push_read_request(cluster_number: u64) {}
-
-// before attempting to read that block, check if its already in memory
-// IDK i think i should have an internal struct and an in memory struct
 
 // -----------------
 // USER API
@@ -216,3 +222,18 @@ pub fn add_node() {
         level += 1;
     }
 }
+
+/*
+NOTES:
+
+to find a specific block of a specific file: (logn)^2
+to find k specific blocks of a specific file: k(logn)^2. Good if not as fragmented so we can allocate large cont sectors from the free area (free list)
+
+assume you can only submit 4K read requests at a time
+and receive a 4K block back, sometime later
+for now its quite good
+
+before attempting to read that block, check if its already in memory
+IDK i think i should have an internal struct and an in memory struct
+
+*/
