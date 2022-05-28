@@ -16,6 +16,18 @@ Kernel Bookkeeping:
 /sys/users => stores permissions for each user on the system. And their names and passwords. If enabled. By default, non existent. Can be used with software to determine whether a user can read/write a specific vnode number
 
 /sys/fs/rootfs_meta => TOML that stores extra metadata for the rootfs. A list of pairs of [inode: <times>, <etc>]. Used by `ls`. And usually a memory mapped file. The [free_inode] stores a list of free inodes LIFO. In a serialised state .serde or a readable state yml for quick viewing just in case
+
+File Handles:
+Instead of dealing with pointers and references, which can get messy, we address everything by their 'cluster number' or 'sector number'. Its P(1) to then go to that cluster
+
+The structs themselves dont know how that works, even in memory. In memory you basically map the entire fs tree aligned to page size
+
+Stack Based:
+Its hard to do a stack based in memory structure. So instead we dont. We use the heap and grow and shrink as needed, some overhead yes but at least we dont have to write it to the write_queue and jam the bus
+
+We can convert the heap based memory struct to a stack based one somehow. I think its possible since all nodes are the same size so we could pop one of them out and put a certain one in. And just reference the stack addr of it
+
+But the actual memory mapped data will def have to use a 'heap' like structure. Thats prob the bigger thing. Though very low latency file indexing is also good
 */
 
 // -------------
@@ -23,8 +35,12 @@ Kernel Bookkeeping:
 // -------------
 
 extern crate alloc;
-use alloc::vec::Vec;
+use alloc::{boxed::Box, rc::Rc, vec::Vec};
 use bincode::{Decode, Encode};
+use core::{
+    borrow::BorrowMut,
+    cell::{RefCell, RefMut},
+};
 use rand_mt::Mt19937GenRand64;
 
 // -------------
@@ -79,99 +95,48 @@ pub struct SuperBlock {
     fs_node_size_bytes: u16,
 }
 
-/*
-We want it to be able to be empty. So Option<> maybe
-We also dont need a root list per se. We can just cache the n levels per inode so we dont have to call .len() each time
-*/
-
-#[repr(C, packed)]
-#[derive(Debug, Encode, Decode)]
-pub struct RootList {
-    n_inode_levels: u64,
-    // each level points to the next one with the same level available
-    // will have to alloc quite a bit more data for this. All we need is .next() and .down()
-    inodes: Vec<INode>,
-}
-
-impl RootList {
-    pub fn new(n_inode_levels: u64, inodes: Vec<INode>) -> Self {
-        Self {
-            n_inode_levels,
-            inodes,
-        }
-    }
-
-    // search for a value (inode number). And maybe return a ref to that node
-    pub fn search(&mut self, val: u64) -> Option<&INode> {
-        let mut curr_node = &self.inodes[self.n_inode_levels as usize - 1];
-
-        // for each level, compare
-        for level in 0..self.n_inode_levels as usize {
-            // idk if packed stuff will work properly
-            // maybe we implement packed when we write and depack when we go into memory
-            let mut next = &curr_node.next_nodes[level];
-
-            // node found
-            if next.val() == val {
-                return Some(next);
-            }
-            // node bounded, go down a level
-            else if next.val() < val {
-                continue;
-            }
-            // node farer away, go next node
-            else {
-                curr_node = next;
-            }
-        }
-
-        None
-    }
-
-    /// Assumes all vals should be unique (check inode table)
-    /// generate a level via MT or something. On an OS, do it with std
-    pub fn add_node(&mut self, val: u64, level: u64) {
-        // search for the place to put it in. Like search() but except you have a pointer to the prev node as well
-    }
-
-    /// Gets rid of a node
-    pub fn remove_node(&mut self, val: u64) {}
-}
+pub type ClusterNumber = u64;
+pub type InodeNumber = u64;
 
 /// Inode = Index Node
 #[repr(C, packed)]
 #[derive(Debug, Encode, Decode)]
 pub struct INode {
-    value: u64,
-    data: Vec<DataNode>,
+    value: InodeNumber,
+    cluster_number: ClusterNumber,
+    // when converting to disk form, it has be table-cluster based rather than 'tree' based. The data is serialised into bytes like usual with or without compression
+    // only level 0 has a data node, maybe use an enum for it
+    data: DataNode,
     // its actual data (pointers to chunks) is also a skiplist
-    next_nodes: Vec<INode>,
+    // go to the cluster and read N bytes for cluster/sector size
+    next_node: ClusterNumber,
+    lower_node: ClusterNumber,
 }
 
-impl INode {
-    pub fn new(value: u64, data: Vec<DataNode>, next_nodes: Vec<INode>) -> Self {
-        Self {
-            value,
-            data,
-            next_nodes,
-        }
-    }
+// node size / entry size, prob like 2 pages
+pub const MAX_DATA_NODES: u64 = 8192;
 
-    pub fn val(&self) -> u64 {
-        self.value
-    }
-
-    // best idea for most small-med range sized files
-    // returns it all as a contiguous chunk of bytes
-    pub fn get_all_data(&mut self) {}
-
-    // returns one or more blocks depending on the offset and size you want
-    // more efficient for bigger files
-    pub fn get_data(&mut self) {}
-
-    // methods to point to a new node for a certain level
-
-    // idk if recursive search or bottom up. I think just iterative on the main
+#[repr(C)]
+#[derive(Debug, Encode, Decode)]
+pub enum Inode {
+    // level > 0
+    InternalNode {
+        value: InodeNumber,
+        cluster_number: ClusterNumber,
+        next_node: ClusterNumber,
+        lower_node: ClusterNumber,
+    },
+    LeafNode {
+        // always level 0
+        // next in the chain
+        next_node: ClusterNumber,
+        // actual data
+        offset: u64,
+        // search the data skiplist for the nodes
+        // usually only MAX_DATA_NODES allowed
+        // each data skiplistnode
+        data_nodes: u64,
+    },
 }
 
 // it points to an offset
