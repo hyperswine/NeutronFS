@@ -1,0 +1,15 @@
+[interface.format]
+timestamp = "neutron"
+# the kernel itself only deals with a 'minimal shell' (KernelShell). Which is implemented by kcons
+shell = "reish"
+
+[shell]
+# k2cons is the default "software" rendered shell. It always outputs to a single framebuffer. Though with a proper driver you can mirror it or duplicate it
+# it is actually userspace software, but is tightly coupled to the kernel's shell protocols and framebuffer API
+implementation = "k2cons"
+
+# [locale]
+# NOTE: neutron uses "standard time" ST. Software should always convert ST to a local timestamp. ArcDE does this with its time subsystem
+# ST is defined as the time it takes for the birthplace of civilization (uruk) / tower of babel to spin around once on its axis and goes from 0-24 hrs and 0-60 min
+# All systems running neutron must have a proper ST timer
+# timezone = "UTC+10"

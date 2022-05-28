@@ -1,0 +1,3 @@
+[mount]
+# rootfs always implicitly specified and mounted
+mount = [["/dev/nvme0p0", "/boot"]]

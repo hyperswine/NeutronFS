@@ -1,0 +1,4 @@
+[metadata.neutron.extra]
+# inode = {key = val}
+# NOTE: by default neutron uses Minima time, to use a less precise time scheme, set time = UNIX_TIME in /sys/config/kernel.toml under [interface.format]
+1 = { last_modified = "yyyy-mm-dd hh:mm:ss" }
