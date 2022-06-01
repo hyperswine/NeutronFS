@@ -41,11 +41,18 @@ But the actual memory mapped data will def have to use a 'heap' like structure. 
 */
 
 // -------------
+// API
+// -------------
+
+pub mod block;
+
+// -------------
 // USES
 // -------------
 
-use alloc::vec::Vec;
+use alloc::{string::String, vec, vec::Vec};
 use bincode::{Decode, Encode};
+use neutronapi::fs::{Readable, Writable};
 use rand_mt::Mt19937GenRand64;
 
 // -------------
@@ -146,41 +153,31 @@ pub enum Inode {
 }
 
 impl Inode {
-    /// Given inode number I, find its associated cluster number C
-    /// Its the lower level driver's job to find that cluster in the physical media and access its data in a safe way
-    pub fn find_inode_cluster_number(
-        &self,
-        inode_number: InodeNumber,
-    ) -> Result<ClusterNumber, ClusterNumber> {
+    /// Given inode number I (self), find its associated cluster number C
+    pub fn get_cluster_number(&self) -> ClusterNumber {
         match self {
-            Inode::InternalNode(i) => {
-                if inode_number == i.value {
-                    return Ok(i.cluster_number);
-                }
-                // <, return return the cluster number of the next one
-                else if inode_number < i.value {
-                    return Err(i.lower_node);
-                }
-                // >
-                else {
-                    return Err(i.next_node);
-                }
-            }
-            // either return or go next
-            Inode::LeafNode(l) => {
-                if inode_number == l.value {
-                    return Ok(l.cluster_number);
-                } else {
-                    return Err(l.next_node);
-                }
-            }
+            Inode::InternalNode(i) => i.cluster_number,
+            Inode::LeafNode(l) => l.cluster_number,
         }
+    }
+
+    /// Get a list of the cluster numbers of all associated data nodes
+    /// Uses a backend
+    pub fn get_all_data_nodes(&self) -> Vec<ClusterData> {
+        let res: Vec<ClusterData> = vec![];
+
+        // call block driver to find the nodes
+        // (or block driver backend) which simulates a file
+        //
+
+        res
     }
 }
 
 // All a data node is is some reference to a contiguous sector of data
 // It stores the cluster number of that data (in the cluster data area)
 // And the cont size of that data
+// Its the lower level driver's job to find that cluster in the physical media and access its data in a safe way
 
 /// Each data node must refer to a cont block of allocated clusters
 #[repr(C)]
@@ -200,41 +197,6 @@ impl DataNode {
 }
 
 type ClusterData = [u8; PAGE_SIZE as usize];
-
-/// A type that impls Read should be a file like type
-/// that starts at its starting offset
-pub trait Read {
-    // e.g. [u8; 4096]. Should be moved across memory or from disk to buffer
-    // to dual copy, use .clone()
-    type Res;
-
-    // a source S, which is either a trait or something else
-    // defaultly used function
-    fn read_from_source(&self, offset: u64, n_bytes: u64) -> Self::Res;
-}
-
-/// Access a cluster number to get the data
-pub fn access_cluster<R: Read<Res = ClusterData>>(
-    cluster_number: ClusterNumber,
-    feature_offset: u64,
-    reader: R,
-) -> ClusterData {
-    // use the Reader R
-    // a starting offset may or may not be given. May be always just pass the partition reader and the feature offset. The cluster number is also an offset
-    // if starting at the beginning, feature_offset = 0
-    let mut actual_offset = cluster_number * PAGE_SIZE;
-    actual_offset += feature_offset;
-
-    // where Res: ClusterData
-
-    let res = reader.read_from_source(actual_offset, 4096);
-
-    // read from R at feature_offset and 4096 Bytes
-    // NOTE: in memory, we can just copy() the data For actual disk io, you need the MMIO API which prob involves core::ptr::read/write. Just need to pass the struct that implements Read here
-
-    // [0 as u8; 4096]
-    res
-}
 
 /// Always adds LIFO (inserts at the front)
 /// could prob be very fragmented
@@ -259,30 +221,9 @@ impl FreeClusterNode {
 // INTERNAL API
 // -----------------
 
-pub struct MemReader4096;
-
-impl Read for MemReader4096 {
-    type Res = [u8; 4096];
-
-    fn read_from_source(&self, offset: u64, n_bytes: u64) -> Self::Res {
-        // do a copy() from the source page
-
-        [0 as u8; 4096]
-    }
-}
-
-pub struct ReadQueue {
-    // want to read these blocks
-    queue: Vec<u64>,
-}
-
-pub fn push_read_request(cluster_number: u64) {}
-
-// -----------------
-// USER API
-// -----------------
-
-pub fn add_node() {
+/// Add an inode or data node to their respective trees
+/// Maybe just have methods for them. Though a lot of the logic is the same
+pub fn generate_level() {
     // use mt. NOTE: some arm chips have a trustzone subsystem for generating random numbers
     // riscv too. We'll need a driver for those to generate values
     // another way is to slice the 64-bit generated number up into 8 chunks and check each one %2 break if 0 right away or go next if all 8 are 1
@@ -300,12 +241,70 @@ pub fn add_node() {
         // rolled a 1, increment level
         level += 1;
     }
+
+    // find the key and add it there
 }
+
+// -----------------
+// USER API
+// -----------------
 
 // impl rust std directly by implementing its traits?
 // no, implement VFS traits, which then implements std
+// NOTE: this doesnt handle any other fs. So you have a mounted QFS, that will actually call the QFS driver Readable/Writable trait impls
 
+impl Readable for Inode {
+    fn read_all(&self) -> String {
+        let res = String::from("");
 
+        // read all the data nodes
+        // NOTE: assuming memory is either cached in RAM
+        // if you need to, call the block driver to actually read from the SSD
+
+        res
+    }
+
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<usize, &'static str> {
+        // read into buf of len() bytes
+        let bytes_to_read = buf.len();
+
+        // for this inode, find the data nodes that overlap the offset + len
+        // if file too small, just read as much as you can. Should return >= 0
+        // Usually shouldnt be an error, except if the file is protected or something. Maybe the file on disk is bad
+
+        todo!()
+    }
+
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), &'static str> {
+        // basically read_at, but if the file is too small (run into EOF), then it should return an error
+        // and not fill the buf
+
+        todo!()
+    }
+}
+
+impl Writable for Inode {
+    fn rewrite(&mut self, buf: &[u8]) {
+        // check if there enough data blocks to hold buf
+        // total_len >= buf
+        // if not, need to allocate one more block (or multiple smaller blocks) >= the size of buf
+        // nefs only allows you to allocate 4K blocks at a time
+
+        // if the new data is actually smaller than the total len of blocks
+        // check if you can deallocate some. By total_len / len. If > 1, you can deallocate floor(n_extra_blocks)
+        // by using the fs drivers' deallocate() function that takes a handle to the block and deallocs it (might be cool if we can just pass the cluster number)
+
+        todo!()
+    }
+
+    fn write_at(&self, buf: &[u8], offset: u64) -> Result<usize, &'static str> {
+        todo!()
+    }
+
+    fn write_all_at(&self, buf: &[u8], offset: u64) -> Result<(), &'static str> {
+        todo!()
+    }
+}
 
 // ------------
 // TESTS

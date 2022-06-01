@@ -147,3 +147,31 @@ If using pointers, you have to dealloc the node manually. Instead of just saying
 ## Manual
 
 We have to use pointers to the structs. Nah actually just use keys. The 'next' and 'bottom' actually refer to the ID of the block. To find that block in O(1) we use cluster number. Then we just add the cluster number to the starting offset to go to that node.
+
+FINDING AN INODE NODE IN A SKIPLIST:
+
+```rust
+match self {
+            Inode::InternalNode(i) => {
+                if inode_number == i.value {
+                    return Ok(i.cluster_number);
+                }
+                // <, return return the cluster number of the next one
+                else if inode_number < i.value {
+                    return Err(i.lower_node);
+                }
+                // >
+                else {
+                    return Err(i.next_node);
+                }
+            }
+            // either return or go next
+            Inode::LeafNode(l) => {
+                if inode_number == l.value {
+                    return Ok(l.cluster_number);
+                } else {
+                    return Err(l.next_node);
+                }
+            }
+        }
+```
