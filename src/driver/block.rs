@@ -42,12 +42,12 @@ impl Read for MemReader4096 {
 // or maybe just have a more generic transaction queue for both reading and writing
 // the open file descriptors are handled elsewhere and can be pushed here as an arg
 
-pub struct ReadQueue {
+pub struct TransactionQueue {
     // want to read these blocks
     queue: Vec<ClusterNumber>,
 }
 
-impl ReadQueue {
+impl TransactionQueue {
     pub fn new(queue: Vec<ClusterNumber>) -> Self {
         Self { queue }
     }
@@ -58,45 +58,63 @@ impl ReadQueue {
 
 pub trait BlockDriver {
     fn push_read_request(&mut self, cluster_number: u64);
-    /// Access a cluster number to get the data
-    fn access_cluster<R: Read<Res = ClusterData>>(
-        &mut self,
-        cluster_number: ClusterNumber,
-        feature_offset: u64,
-        reader: R,
-    ) -> ClusterData;
+    
 }
 
-// sample implementation (neutronapi)
+// neutronapi like implementation
 
-pub struct HostDriver {
-    read_queue: ReadQueue,
+pub struct NeutronDriver {
+    read_queue: TransactionQueue,
 }
 
-impl BlockDriver for HostDriver {
+impl BlockDriver for NeutronDriver {
     fn push_read_request(&mut self, cluster_number: u64) {
         self.read_queue.push(cluster_number);
     }
 
-    fn access_cluster<R: Read<Res = ClusterData>>(
-        &mut self,
-        cluster_number: ClusterNumber,
-        feature_offset: u64,
-        reader: R,
-    ) -> ClusterData {
-        // use the Reader R
-        // a starting offset may or may not be given. May be always just pass the partition reader and the feature offset. The cluster number is also an offset
-        // if starting at the beginning, feature_offset = 0
-        let mut actual_offset = cluster_number * PAGE_SIZE;
-        actual_offset += feature_offset;
+    
+}
 
-        // where Res: ClusterData
+// -------------
+// VIRTUAL PARTITION
+// -------------
 
-        let res = reader.read_from_source(actual_offset, 4096);
+// host file backend
+// sample implementation
 
-        // read from R at feature_offset and 4096 Bytes
-        // NOTE: in memory, we can just copy() the data For actual disk io, you need the MMIO API which prob involves core::ptr::read/write. Just need to pass the struct that implements Read here
+type Block = [u8; 4096];
 
-        [0 as u8; 4096]
+// a drive has >= 1 partition and is formatted with GPT
+// we only care about the partition itself
+
+// In memory view of a partition
+// Contains number of blocks and block size
+// All blocks are always in order
+// Assume you cant resize a partition
+
+/// You can only read a single block at a time and write single block at a time
+/// In and Out requests are queued in its readqueue/writequeue
+pub struct Partition {
+    n_blocks: u64,
+    blocks: Vec<Block>,
+    read_queue: TransactionQueue,
+    write_queue: TransactionQueue,
+}
+
+impl Partition {
+    pub fn new(
+        n_blocks: u64,
+        blocks: Vec<Block>,
+        read_queue: TransactionQueue,
+        write_queue: TransactionQueue,
+    ) -> Self {
+        Self {
+            n_blocks,
+            blocks,
+            read_queue,
+            write_queue,
+        }
     }
+
+    pub fn 
 }
