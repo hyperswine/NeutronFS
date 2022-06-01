@@ -175,3 +175,18 @@ match self {
             }
         }
 ```
+
+Get rid of:
+
+```toml
+default-features = false, features = [
+    "async-global-executor",
+    "async-io",
+    "futures-lite",
+    "kv-log-macro",
+    "log",
+    "num_cpus",
+    "pin-project-lite",
+    "gloo-timers",
+]
+```
