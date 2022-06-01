@@ -44,13 +44,8 @@ But the actual memory mapped data will def have to use a 'heap' like structure. 
 // USES
 // -------------
 
-extern crate alloc;
-use alloc::{boxed::Box, rc::Rc, vec::Vec};
+use alloc::vec::Vec;
 use bincode::{Decode, Encode};
-use core::{
-    borrow::BorrowMut,
-    cell::{RefCell, RefMut},
-};
 use rand_mt::Mt19937GenRand64;
 
 // -------------
@@ -306,3 +301,15 @@ pub fn add_node() {
         level += 1;
     }
 }
+
+// impl rust std directly by implementing its traits?
+// no, implement VFS traits, which then implements std
+
+
+
+// ------------
+// TESTS
+// ------------
+
+#[test]
+fn test_basics() {}

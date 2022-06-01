@@ -26,6 +26,8 @@ bincode = { version = "2.0.0-rc.1", default-features = false, features = [
 rand_mt = { version = "4.1.1", default-features = false, features = [
     "rand-traits",
 ] }
+# DONT INCLUDE THIS IN lib.rs
+clap = { version = "3.1.18", features = ["derive"] }
 
 # LINK DIOXUS TO the BIN TARGET ONLY!
 
