@@ -3,6 +3,7 @@
 
 use clap::Parser;
 use core::task;
+use std::io::Write;
 use neutron_fs::driver::block::{Block, BlockDriver, ReadQueue, WriteQueue};
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
@@ -22,17 +23,47 @@ use pasts::{prelude::*, Loop, Task};
 
 /// The nefs.elf program
 fn main() {
-    let args = Args::parse();
+    // let args = Args::parse();
 
-    for _ in 0..args.count {
-        println!("Hello {}!", args.name)
-    }
+    // for _ in 0..args.count {
+    //     println!("Hello {}!", args.name)
+    // }
 
-    let filepath = args.name.clone();
+    // let filepath = args.name.clone();
 
-    let mut f = File::open(filepath).expect("Couldnt open file");
+    // let mut f = File::open(filepath).expect("Couldnt open file");
 
     // parse the header
+
+    // build a sample partition with 100 blocks
+    let blocks: Vec<Block> = vec![[0 as u8; 4096]; 100];
+    let read_queue: Mutex<ReadQueue> = Mutex::new(ReadQueue::new(vec![]));
+    let write_queue: Mutex<WriteQueue> = Mutex::new(WriteQueue::new(vec![]));
+    let mut partition = VPartition::new(100, blocks, read_queue, write_queue);
+
+    // println!(
+    //     "created a virtual partition of 100 blocks. Partition = {:?}",
+    //     partition
+    // );
+
+    // spawn a handle thread for the partition
+    // normally, doesnt join. On the kernel handler (userspace daemon)
+    let t = thread::spawn(move || {
+        partition.handle_requests();
+    });
+    t.join().expect("The listener thread panicked");
+
+    // kernel idle loop
+    loop {}
+
+    // make read request
+
+    // make a write request
+
+    // make another write request
+
+    // print out results
+    // NOTE: could also busy wait for flag = true for a specific request
 }
 
 fn get_help_message() -> String {
@@ -68,6 +99,7 @@ fn get_help_message() -> String {
 /// In and Out requests are queued in its readqueue/writequeue
 /// n_blocks, blocks can only be accessed once at a time
 /// Once a request is fulfilled completely, the calling thread will be signalled. If a read() req, the buffer should be filled
+#[derive(Debug)]
 pub struct VPartition<'a> {
     n_blocks: u64,
     blocks: Vec<Block>,
@@ -98,8 +130,16 @@ impl<'a> VPartition<'a> {
         // NOTE: dont have separate reads and writes as that may cause some race conditions between what we need
         // on disk. IDK actually. maybe we want to prioritise a read req. To have the latest data. But its hard to know what the user really wants. Thats why in memory is much better
         // disk should just be read and written in any order prob. Its hard to control since theres so many variables
-        // and we dont have our own design of hardwarre
+        // and we dont have our own design of hardware
+
+        let mut file = File::create("output.txt").unwrap();
+        file.write(b"This is an output");
+    
+        // MAYBE stdout for this thread not the same?
+        println!("In handler function!");
         loop {
+            println!("In loop!!");
+
             // check read requests
             let mut lock = self.read_queue.try_lock();
             if let Ok(ref mut mutex) = lock {
@@ -143,15 +183,14 @@ impl<'a> VPartition<'a> {
                             Some(b) => {
                                 // move it instead. I think you can use move from data or std::mem::move
                                 b.copy_from_slice(&btw.1);
-                            },
+                            }
                             None => todo!(),
                         }
-                    },
+                    }
                     None => {
                         println!("No pending writes");
-                    },
+                    }
                 }
-                
             } else {
                 println!("write lock is being used... nothing to do");
             }
@@ -194,6 +233,10 @@ impl<'a> BlockDriver<'a> for VPartition<'a> {
         }
     }
 }
+
+// -------------
+// TESTS
+// -------------
 
 #[test]
 fn test_stuff() {

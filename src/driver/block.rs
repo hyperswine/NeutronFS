@@ -13,12 +13,13 @@ pub type Block = [u8; 4096];
 
 // or maybe just have a more generic transaction queue for both reading and writing
 // the open file descriptors are handled elsewhere and can be pushed here as an arg
-
+#[derive(Debug)]
 pub struct ReadQueue<'a> {
     // want to read these blocks
     queue: Vec<(ClusterNumber, &'a mut [u8])>,
 }
 
+#[derive(Debug)]
 pub struct WriteQueue {
     // want to read these blocks
     // should just clone() it
