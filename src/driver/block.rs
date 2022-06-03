@@ -14,13 +14,14 @@ pub type Block = [u8; 4096];
 // or maybe just have a more generic transaction queue for both reading and writing
 // the open file descriptors are handled elsewhere and can be pushed here as an arg
 
-pub struct ReadQueue {
+pub struct ReadQueue<'a> {
     // want to read these blocks
-    queue: Vec<ClusterNumber>,
+    queue: Vec<(ClusterNumber, &'a mut [u8])>,
 }
 
 pub struct WriteQueue {
     // want to read these blocks
+    // should just clone() it
     queue: Vec<(ClusterNumber, Block)>,
 }
 
@@ -31,19 +32,26 @@ impl WriteQueue {
     pub fn push(&mut self, cluster_number: ClusterNumber, block: Block) {
         self.queue.push((cluster_number, block));
     }
+    pub fn pop(&mut self) -> Option<(ClusterNumber, Block)> {
+        self.queue.pop()
+    }
 }
 
-impl ReadQueue {
-    pub fn new(queue: Vec<ClusterNumber>) -> Self {
+impl<'a> ReadQueue<'a> {
+    pub fn new(queue: Vec<(ClusterNumber, &'a mut [u8])>) -> Self {
         Self { queue }
     }
-    pub fn push(&mut self, cluster_number: ClusterNumber) {
-        self.queue.push(cluster_number);
+
+    pub fn push(&mut self, buf: &'a mut [u8], cluster_number: ClusterNumber) {
+        self.queue.push((cluster_number, buf));
+    }
+    pub fn pop(&mut self) -> Option<(ClusterNumber, &'a mut [u8])> {
+        self.queue.pop()
     }
 }
 
-pub trait BlockDriver {
-    fn push_read_request(&mut self, cluster_number: u64);
+pub trait BlockDriver<'a> {
+    fn push_read_request(&mut self, buf: &'a mut [u8], cluster_number: u64);
     fn push_write_request(&mut self, cluster_number: u64, block: Block);
 }
 
@@ -55,14 +63,14 @@ pub trait BlockDriver {
 
 // would also have the actual ACPI or MMIO fields to read/write from
 // with a core::ptr::read/write volatile
-pub struct NeutronDriver {
-    read_queue: ReadQueue,
+pub struct NeutronDriver<'a> {
+    read_queue: ReadQueue<'a>,
     write_queue: WriteQueue,
 }
 
-impl BlockDriver for NeutronDriver {
-    fn push_read_request(&mut self, cluster_number: u64) {
-        self.read_queue.push(cluster_number);
+impl<'a> BlockDriver<'a> for NeutronDriver<'a> {
+    fn push_read_request(&mut self, buf: &'a mut [u8], cluster_number: u64) {
+        self.read_queue.push(buf, cluster_number);
     }
 
     fn push_write_request(&mut self, cluster_number: u64, block: Block) {
