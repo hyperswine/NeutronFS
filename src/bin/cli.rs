@@ -3,8 +3,8 @@
 
 use clap::Parser;
 use core::task;
-use std::io::Write;
 use neutron_fs::driver::block::{Block, BlockDriver, ReadQueue, WriteQueue};
+use std::io::Write;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
 use std::{fs::File, ptr::null};
@@ -40,23 +40,57 @@ fn main() {
     let read_queue: Mutex<ReadQueue> = Mutex::new(ReadQueue::new(vec![]));
     let write_queue: Mutex<WriteQueue> = Mutex::new(WriteQueue::new(vec![]));
     let mut partition = VPartition::new(100, blocks, read_queue, write_queue);
+    let mut partition = Mutex::new(partition);
 
     // println!(
     //     "created a virtual partition of 100 blocks. Partition = {:?}",
     //     partition
     // );
 
+    // let mut buf = Vec::with_capacity(4096);
+    static mut buf: [u8; 4096] = [0 as u8; 4096];
+    let cluster_number = 1;
+
     // spawn a handle thread for the partition
     // normally, doesnt join. On the kernel handler (userspace daemon)
-    let t = thread::spawn(move || {
-        partition.handle_requests();
+
+    // need tokio maybe
+
+    // cant borrow as mutable two times...
+    // have to use Mutex on partition maybe
+    let t = thread::spawn(|| {
+        /*
+        let mut lock = self.read_queue.try_lock();
+        if let Ok(ref mut mutex) = lock
+        */
+        loop {
+            // try lock
+            let mut lock = partition.try_lock();
+            if let Ok(ref mut mutex) = lock {
+                let partition = mutex.deref_mut();
+                partition.handle_requests();
+            }
+        }
     });
     t.join().expect("The listener thread panicked");
 
-    // kernel idle loop
-    loop {}
-
     // make read request
+    let read_req = thread::spawn(|| unsafe {
+        loop {
+            // try lock
+            let mut lock = partition.try_lock();
+            if let Ok(ref mut mutex) = lock {
+                let partition = mutex.deref_mut();
+                partition.push_read_request(&mut buf, cluster_number);
+            }
+        }
+    });
+    read_req.join().expect("Request made");
+
+    // theres no way to tell when the buf is ready. At least here.
+    // could have a simulated interrupt or thread channel (sender/receiver)
+    // since its pretty simple. An interrupt directed at the calling thread
+    // but needs the thing. It needs sender/receiver
 
     // make a write request
 
@@ -64,6 +98,9 @@ fn main() {
 
     // print out results
     // NOTE: could also busy wait for flag = true for a specific request
+
+    // kernel idle loop
+    loop {}
 }
 
 fn get_help_message() -> String {
@@ -126,7 +163,9 @@ impl<'a> VPartition<'a> {
         }
     }
 
-    pub async fn handle_requests(&mut self) {
+    // dont use async unless impl Future/you want something to return
+    // maybe async for the trait
+    pub fn handle_requests(&mut self) {
         // NOTE: dont have separate reads and writes as that may cause some race conditions between what we need
         // on disk. IDK actually. maybe we want to prioritise a read req. To have the latest data. But its hard to know what the user really wants. Thats why in memory is much better
         // disk should just be read and written in any order prob. Its hard to control since theres so many variables
@@ -134,7 +173,7 @@ impl<'a> VPartition<'a> {
 
         let mut file = File::create("output.txt").unwrap();
         file.write(b"This is an output");
-    
+
         // MAYBE stdout for this thread not the same?
         println!("In handler function!");
         loop {
@@ -159,6 +198,9 @@ impl<'a> VPartition<'a> {
                                 b.1.copy_from_slice(r);
                                 // you can actually continue from read_queue.pop() again until theres no more read req
                                 // but that might starve the write reqs
+
+                                // DEBUG: copy the bytes out to file
+                                file.write(b.1);
                             }
                             None => {
                                 println!("BLOCK NUMBER INVALID... PANICKING");
