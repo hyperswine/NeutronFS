@@ -45,6 +45,7 @@ But the actual memory mapped data will def have to use a 'heap' like structure. 
 // -------------
 
 pub mod block;
+pub mod ram;
 
 // -------------
 // USES
@@ -56,7 +57,7 @@ use neutronapi::fs::{Readable, Writable};
 use rand_mt::Mt19937GenRand64;
 
 // -------------
-// TYPE INTERFACE
+// DISK TYPES
 // -------------
 
 /// 64K for a single leaf node (at least in the fs)
@@ -79,7 +80,7 @@ pub type DataNodeNumber = u64;
 pub const MAX_DATA_NODES: u64 = 8192;
 
 // -------------
-// IN MEMORY STRUCTURES
+// DISK STRUCTURES
 // -------------
 
 pub type FSUUID = [u8; 16];
@@ -122,7 +123,6 @@ pub struct SuperBlock {
 #[repr(C)]
 #[derive(Debug, Encode, Decode)]
 pub struct InternalNodeData {
-    // maybe a level?
     level: u64,
     value: InodeNumber,
     cluster_number: ClusterNumber,
@@ -168,7 +168,6 @@ impl Inode {
 
         // call block driver to find the nodes
         // (or block driver backend) which simulates a file
-        //
 
         res
     }
@@ -249,12 +248,12 @@ pub fn generate_level() {
 // USER API
 // -----------------
 
-// impl rust std directly by implementing its traits?
-// no, implement VFS traits, which then implements std
 // NOTE: this doesnt handle any other fs. So you have a mounted QFS, that will actually call the QFS driver Readable/Writable trait impls
+// This uses the RAM module's internal structures
+// /dev/ should be mounted by udev
 
 impl Readable for Inode {
-    fn read_all(&self) -> String {
+    fn read_all(&mut self) -> String {
         let res = String::from("");
 
         // read all the data nodes
@@ -264,7 +263,7 @@ impl Readable for Inode {
         res
     }
 
-    fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<usize, &'static str> {
+    fn read_at(&mut self, buf: &mut [u8], offset: u64) -> Result<usize, &'static str> {
         // read into buf of len() bytes
         let bytes_to_read = buf.len();
 
@@ -275,7 +274,7 @@ impl Readable for Inode {
         todo!()
     }
 
-    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), &'static str> {
+    fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> Result<(), &'static str> {
         // basically read_at, but if the file is too small (run into EOF), then it should return an error
         // and not fill the buf
 
@@ -297,11 +296,11 @@ impl Writable for Inode {
         todo!()
     }
 
-    fn write_at(&self, buf: &[u8], offset: u64) -> Result<usize, &'static str> {
+    fn write_at(&mut self, buf: &[u8], offset: u64) -> Result<usize, &'static str> {
         todo!()
     }
 
-    fn write_all_at(&self, buf: &[u8], offset: u64) -> Result<(), &'static str> {
+    fn write_all_at(&mut self, buf: &[u8], offset: u64) -> Result<(), &'static str> {
         todo!()
     }
 }

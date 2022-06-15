@@ -4,8 +4,10 @@
 use clap::Parser;
 use core::task;
 use neutron_fs::driver::block::{Block, BlockDriver, ReadQueue, WriteQueue};
+use std::cell::RefCell;
 use std::io::Write;
 use std::ops::DerefMut;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::{fs::File, ptr::null};
 use std::{thread, time};
@@ -34,63 +36,59 @@ fn main() {
     // let mut f = File::open(filepath).expect("Couldnt open file");
 
     // parse the header
+}
 
+fn simulate() -> ! {
     // build a sample partition with 100 blocks
-    let blocks: Vec<Block> = vec![[0 as u8; 4096]; 100];
-    let read_queue: Mutex<ReadQueue> = Mutex::new(ReadQueue::new(vec![]));
-    let write_queue: Mutex<WriteQueue> = Mutex::new(WriteQueue::new(vec![]));
-    let mut partition = VPartition::new(100, blocks, read_queue, write_queue);
-    let mut partition = Mutex::new(partition);
+    // to use static mut, you need non const
+    // prob better to see how Arc works?
 
-    // println!(
-    //     "created a virtual partition of 100 blocks. Partition = {:?}",
-    //     partition
-    // );
+    let mut blocks: Vec<Block> = vec![[0 as u8; 4096]; 100];
+    let mut read_queue: Mutex<ReadQueue> = Mutex::new(ReadQueue::new(vec![]));
+    let mut write_queue: Mutex<WriteQueue> = Mutex::new(WriteQueue::new(vec![]));
+    let mut vpartition: VPartition = VPartition::new(100, blocks, read_queue, write_queue);
+    let mut partition = Arc::new(Mutex::new(vpartition));
+
+    // partition has 'a lifetime
+    // function may have a longer lifetime or something
+
+    println!(
+        "created a virtual partition of 100 blocks. Partition = {:?}",
+        partition
+    );
 
     // let mut buf = Vec::with_capacity(4096);
     static mut buf: [u8; 4096] = [0 as u8; 4096];
     let cluster_number = 1;
 
-    // spawn a handle thread for the partition
-    // normally, doesnt join. On the kernel handler (userspace daemon)
-
-    // need tokio maybe
-
-    // cant borrow as mutable two times...
-    // have to use Mutex on partition maybe
-    let t = thread::spawn(|| {
-        /*
-        let mut lock = self.read_queue.try_lock();
-        if let Ok(ref mut mutex) = lock
-        */
-        loop {
-            // try lock
-            let mut lock = partition.try_lock();
-            if let Ok(ref mut mutex) = lock {
-                let partition = mutex.deref_mut();
-                partition.handle_requests();
+    let t = thread::spawn(move || {
+        unsafe {
+            loop {
+                // try lock
+                let mut lock = partition.try_lock();
+                if let Ok(ref mut mutex) = lock {
+                    let part = mutex.deref_mut();
+                    part.handle_requests();
+                }
             }
         }
     });
     t.join().expect("The listener thread panicked");
 
     // make read request
-    let read_req = thread::spawn(|| unsafe {
+    // ? why doesnt it work? I have it on Arc
+    let read_req = thread::spawn(move || unsafe {
         loop {
             // try lock
             let mut lock = partition.try_lock();
+            let mut complete: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
             if let Ok(ref mut mutex) = lock {
-                let partition = mutex.deref_mut();
-                partition.push_read_request(&mut buf, cluster_number);
+                let part = mutex.deref_mut();
+                part.push_read_request(&mut buf, cluster_number, complete);
             }
         }
     });
     read_req.join().expect("Request made");
-
-    // theres no way to tell when the buf is ready. At least here.
-    // could have a simulated interrupt or thread channel (sender/receiver)
-    // since its pretty simple. An interrupt directed at the calling thread
-    // but needs the thing. It needs sender/receiver
 
     // make a write request
 
@@ -137,22 +135,22 @@ fn get_help_message() -> String {
 /// n_blocks, blocks can only be accessed once at a time
 /// Once a request is fulfilled completely, the calling thread will be signalled. If a read() req, the buffer should be filled
 #[derive(Debug)]
-pub struct VPartition<'a> {
+pub struct VPartition {
     n_blocks: u64,
     blocks: Vec<Block>,
     // wrap the read queue in a semaphore since two threads are on it almost at the same time
     // maybe have a handle_read and handle_write
     // it makes sense to busy wait. Or maybe just poll it every 1 second
     // yeah that makes sense. Every X seconds, poll the read and write queue. If there is something, do it. The problem is race conditions then. You need a lock
-    read_queue: Mutex<ReadQueue<'a>>,
+    read_queue: Mutex<ReadQueue<'static>>,
     write_queue: Mutex<WriteQueue>,
 }
 
-impl<'a> VPartition<'a> {
+impl VPartition {
     pub fn new(
         n_blocks: u64,
         blocks: Vec<Block>,
-        read_queue: Mutex<ReadQueue<'a>>,
+        read_queue: Mutex<ReadQueue<'static>>,
         write_queue: Mutex<WriteQueue>,
     ) -> Self {
         Self {
@@ -165,6 +163,7 @@ impl<'a> VPartition<'a> {
 
     // dont use async unless impl Future/you want something to return
     // maybe async for the trait
+    // ? &'a self or &self ?
     pub fn handle_requests(&mut self) {
         // NOTE: dont have separate reads and writes as that may cause some race conditions between what we need
         // on disk. IDK actually. maybe we want to prioritise a read req. To have the latest data. But its hard to know what the user really wants. Thats why in memory is much better
@@ -243,13 +242,18 @@ impl<'a> VPartition<'a> {
     }
 }
 
-impl<'a> BlockDriver<'a> for VPartition<'a> {
+impl<'a> BlockDriver<'a> for VPartition {
     // calls wake() on handle_requests thread
-    fn push_read_request(&mut self, buf: &'a mut [u8], cluster_number: u64) {
+    fn push_read_request(
+        &mut self,
+        buf: &'a mut [u8],
+        cluster_number: u64,
+        complete: Arc<AtomicBool>,
+    ) {
         loop {
             let mut lock = self.read_queue.try_lock();
             if let Ok(ref mut mutex) = lock {
-                mutex.push(buf, cluster_number);
+                mutex.push(buf, cluster_number, complete);
                 break;
             } else {
                 println!("lock is being used, trying again in 0.1 sec...");
@@ -262,11 +266,11 @@ impl<'a> BlockDriver<'a> for VPartition<'a> {
         // self.read_queue.push(cluster_number);
     }
 
-    fn push_write_request(&mut self, cluster_number: u64, block: Block) {
+    fn push_write_request(&mut self, cluster_number: u64, block: Block, complete: Arc<AtomicBool>) {
         loop {
             let mut lock = self.write_queue.try_lock();
             if let Ok(ref mut mutex) = lock {
-                mutex.push(cluster_number, block);
+                mutex.push(cluster_number, block, complete);
                 break;
             } else {
                 println!("lock is being used, trying again in 0.1 sec...");
