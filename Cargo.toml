@@ -4,17 +4,6 @@ version = "0.1.0"
 edition = "2021"
 description = "NeutronFS driver and app code"
 
-[[bin]]
-name = "main"
-required-features = ["graphics"]
-
-[[bin]]
-name = "cli"
-required-features = ["async", "interface"]
-
-# for other binary targets, like a command line tool, dont need graphics
-# for library targets, also dont need graphics or any std lib crates
-
 [dependencies]
 neutronapi = { git = "https://github.com/hyperswine/neutronapi", features = [
     "types",
@@ -33,10 +22,11 @@ rand_mt = { version = "4.1.1", default-features = false, features = [
 # DONT INCLUDE THIS IN lib.rs
 clap = { version = "3.1.18", features = ["derive"], optional = true }
 # Simulated interrupts
-pasts = { version = "0.10.0", optional = true }
+pasts = { version = "0.11.0", optional = true }
 # std isnt available on lib. But can be used on main
 # for no_std, use neutron api threading
 async-std = { version = "1.11.0", optional = true }
+tokio = { version = "*", features = ["full"] }
 
 # LINK DIOXUS TO the BIN TARGET ONLY!
 
