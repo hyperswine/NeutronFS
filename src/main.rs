@@ -1,7 +1,3 @@
-// Similar to the qfs.elf program, but with NeFS/Neutron specific functionalities
-// Callable within the kernel. QFS functionalities are callable within arcboot
-
-use clap::Parser;
 use core::task;
 use neutron_fs::driver::block::{Block, BlockDriver, ReadQueue, WriteQueue};
 use std::cell::RefCell;
@@ -12,18 +8,6 @@ use std::sync::{Arc, Mutex};
 use std::{fs::File, ptr::null};
 use std::{thread, time};
 
-#[derive(Parser, Debug)]
-#[clap(author, version, about, long_about = None)]
-struct Args {
-    #[clap(short, long)]
-    name: String,
-    #[clap(short, long, default_value_t = 1)]
-    count: u8,
-}
-
-use pasts::{prelude::*, Loop, Task};
-
-/// The nefs.elf program
 fn main() {
     // let args = Args::parse();
 
@@ -39,18 +23,11 @@ fn main() {
 }
 
 fn simulate() -> ! {
-    // build a sample partition with 100 blocks
-    // to use static mut, you need non const
-    // prob better to see how Arc works?
-
     let mut blocks: Vec<Block> = vec![[0 as u8; 4096]; 100];
     let mut read_queue: Mutex<ReadQueue> = Mutex::new(ReadQueue::new(vec![]));
     let mut write_queue: Mutex<WriteQueue> = Mutex::new(WriteQueue::new(vec![]));
     let mut vpartition: VPartition = VPartition::new(100, blocks, read_queue, write_queue);
     let mut partition = Arc::new(Mutex::new(vpartition));
-
-    // partition has 'a lifetime
-    // function may have a longer lifetime or something
 
     println!(
         "created a virtual partition of 100 blocks. Partition = {:?}",
@@ -115,33 +92,10 @@ fn get_help_message() -> String {
 // VIRTUAL PARTITION
 // -------------
 
-// host file backend
-// sample implementation
-
-// a drive has >= 1 partition and is formatted with GPT
-// we only care about the partition itself
-
-// In memory view of a partition
-// Contains number of blocks and block size
-// All blocks are always in order
-// Assume you cant resize a partition
-
-// idk about interrupts
-// i want async or something
-// maybe we impl send/sync
-
-/// You can only read a single block at a time and write single block at a time
-/// In and Out requests are queued in its readqueue/writequeue
-/// n_blocks, blocks can only be accessed once at a time
-/// Once a request is fulfilled completely, the calling thread will be signalled. If a read() req, the buffer should be filled
 #[derive(Debug)]
 pub struct VPartition {
     n_blocks: u64,
     blocks: Vec<Block>,
-    // wrap the read queue in a semaphore since two threads are on it almost at the same time
-    // maybe have a handle_read and handle_write
-    // it makes sense to busy wait. Or maybe just poll it every 1 second
-    // yeah that makes sense. Every X seconds, poll the read and write queue. If there is something, do it. The problem is race conditions then. You need a lock
     read_queue: Mutex<ReadQueue<'static>>,
     write_queue: Mutex<WriteQueue>,
 }
@@ -161,19 +115,10 @@ impl VPartition {
         }
     }
 
-    // dont use async unless impl Future/you want something to return
-    // maybe async for the trait
-    // ? &'a self or &self ?
     pub fn handle_requests(&mut self) {
-        // NOTE: dont have separate reads and writes as that may cause some race conditions between what we need
-        // on disk. IDK actually. maybe we want to prioritise a read req. To have the latest data. But its hard to know what the user really wants. Thats why in memory is much better
-        // disk should just be read and written in any order prob. Its hard to control since theres so many variables
-        // and we dont have our own design of hardware
-
         let mut file = File::create("output.txt").unwrap();
         file.write(b"This is an output");
 
-        // MAYBE stdout for this thread not the same?
         println!("In handler function!");
         loop {
             println!("In loop!!");
@@ -181,10 +126,6 @@ impl VPartition {
             // check read requests
             let mut lock = self.read_queue.try_lock();
             if let Ok(ref mut mutex) = lock {
-                // handle read request by accessing disk
-                // NOTE: you would prob need another lock for this if multithreaded drivers/handlers
-                // where multiple handler functions can be spawned for each syscall
-                // just need to lock blocks
                 let read_queue = mutex.deref_mut();
                 let block_number = read_queue.pop();
                 match block_number {
@@ -214,8 +155,7 @@ impl VPartition {
             }
             // check write requests
             if let Ok(ref mut mutex) = self.write_queue.try_lock() {
-                // write the block to RAM
-                // can just move it because you dont need it anymore
+                // write the block to RAM -> can just move it because you dont need it anymore
                 let write_queue = mutex.deref_mut();
                 let block_to_write = write_queue.pop();
                 match block_to_write {
