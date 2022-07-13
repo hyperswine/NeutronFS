@@ -7,19 +7,12 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::{fs::File, ptr::null};
 use std::{thread, time};
+use tokio::net::TcpListener;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-fn main() {
-    // let args = Args::parse();
-
-    // for _ in 0..args.count {
-    //     println!("Hello {}!", args.name)
-    // }
-
-    // let filepath = args.name.clone();
-
-    // let mut f = File::open(filepath).expect("Couldnt open file");
-
-    // parse the header
+#[tokio::main]
+async fn main() {
+    
 }
 
 fn simulate() -> ! {

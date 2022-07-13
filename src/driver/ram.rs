@@ -2,9 +2,6 @@
 // ROOTFS RAM STRUCTURES
 // -------------
 
-// initramfs
-// syscalls should use RAM based structures
-
 // On NeFS, we dont care about file extensions
 
 use alloc::{borrow::Cow, string::String, vec::Vec};
@@ -20,9 +17,7 @@ pub enum FileEncoding {
     Raw,
 }
 
-// I dont see why we dont just store the file's data on the heap
-// or a pseudo heap on the stack
-// in shared memory and CoW
+// I dont see why we dont just store the file's data on the heap / shared memory and CoW
 
 #[repr(C)]
 #[derive(Debug, Clone)]
