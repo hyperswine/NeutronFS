@@ -3,48 +3,97 @@
 use core::sync::atomic::AtomicBool;
 
 use super::{ClusterData, ClusterNumber, PAGE_SIZE};
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{borrow::ToOwned, sync::Arc, vec::Vec};
+use bytes::Bytes;
 
 pub type Block = [u8; 4096];
+
+pub fn make_block() -> Block {
+    let res: [u8; 4096] = [0; 4096];
+    res
+}
 
 // -------------
 // BLOCK DRIVER
 // -------------
 
+/// Do allocate this somewhere handy, like the stack. Cache if possible!
+#[derive(Debug)]
+pub struct RingBuffer<T, const SIZE: usize> {
+    curr_head: usize,
+    n_elements: usize,
+    max_size: usize,
+    buffer: [T; SIZE],
+}
+
+impl<T: Clone, const SIZE: usize> RingBuffer<T, SIZE> {
+    pub fn new(curr_head: usize, n_elements: usize, max_size: usize, buffer: [T; SIZE]) -> Self {
+        Self {
+            curr_head,
+            n_elements,
+            max_size,
+            buffer,
+        }
+    }
+
+    /// Push a new element to the back of the queue. Or if full, to the head, and increment the curr_head
+    pub fn push(&mut self, t: T) {
+        // if full (n_elements = max_size), replace the head and increment (% size if needed)
+        let ind = (self.curr_head + self.n_elements) % self.max_size;
+        self.buffer[ind] = t;
+        // move head to next
+        let next = (ind + 1) % self.max_size;
+        self.curr_head = next;
+    }
+
+    /// Get the head
+    pub fn pop(&mut self) -> T {
+        let ind = self.curr_head;
+        self.curr_head = (self.curr_head + 1) % self.max_size;
+        self.buffer[ind].clone()
+    }
+}
+
 // USE A RING BUFFER, basically a pointer to the current head and a max size
 // Then "push" or append to the buffer at head - 1/curr_size. If would overflow, just replace the head
 
+pub const MAX_QUEUE_SIZE: usize = 64;
+
 #[derive(Debug)]
-pub struct ReadQueue<'a> {
-    queue: Vec<(ClusterNumber, &'a mut [u8], Arc<AtomicBool>)>,
+pub struct ReadQueue {
+    queue: RingBuffer<(ClusterNumber, Block), MAX_QUEUE_SIZE>,
 }
 
 #[derive(Debug)]
 pub struct WriteQueue {
-    queue: Vec<(ClusterNumber, Block, Arc<AtomicBool>)>,
+    queue: RingBuffer<(ClusterNumber, Block), MAX_QUEUE_SIZE>,
 }
 
 impl WriteQueue {
-    pub fn new(queue: Vec<(ClusterNumber, Block, Arc<AtomicBool>)>) -> Self {
+    pub fn new(queue: RingBuffer<(ClusterNumber, Block), MAX_QUEUE_SIZE>) -> Self {
         Self { queue }
     }
-    pub fn push(&mut self, cluster_number: ClusterNumber, block: Block, arc: Arc<AtomicBool>) {
-        self.queue.push((cluster_number, block, arc));
+
+    pub fn push(&mut self, cluster_number: ClusterNumber, block: Block) {
+        self.queue.push((cluster_number, block));
     }
-    pub fn pop(&mut self) -> Option<(ClusterNumber, Block, Arc<AtomicBool>)> {
-        self.queue.pop()
+    pub fn pop(&mut self) -> Option<(ClusterNumber, Block)> {
+        Some(self.queue.pop())
     }
 }
 
-impl<'a> ReadQueue<'a> {
-    pub fn new(queue: Vec<(ClusterNumber, &'a mut [u8], Arc<AtomicBool>)>) -> Self {
+impl ReadQueue {
+    pub fn new(queue: RingBuffer<(ClusterNumber, Block), MAX_QUEUE_SIZE>) -> Self {
         Self { queue }
     }
-    pub fn push(&mut self, buf: &'a mut [u8], cluster_number: ClusterNumber, arc: Arc<AtomicBool>) {
-        self.queue.push((cluster_number, buf, arc));
+
+    pub fn push(&mut self, buf: &mut [u8], cluster_number: ClusterNumber) {
+        let mut new_buf: Block = make_block();
+        new_buf.copy_from_slice(&buf[..4095]);
+        self.queue.push((cluster_number, new_buf));
     }
-    pub fn pop(&mut self) -> Option<(ClusterNumber, &'a mut [u8], Arc<AtomicBool>)> {
-        self.queue.pop()
+    pub fn pop(&mut self) -> Option<(ClusterNumber, Block)> {
+        Some(self.queue.pop())
     }
 }
 
@@ -53,36 +102,26 @@ impl<'a> ReadQueue<'a> {
 // must use ARC with mutex
 
 /// Interface for block drivers to implement
-pub trait BlockDriver<'a> {
-    fn push_read_request(
-        &mut self,
-        buf: &'a mut [u8],
-        cluster_number: u64,
-        complete: Arc<AtomicBool>,
-    );
-    fn push_write_request(&mut self, cluster_number: u64, block: Block, complete: Arc<AtomicBool>);
+pub trait BlockDriver {
+    fn push_read_request(&mut self, buf: &mut [u8], cluster_number: u64);
+    fn push_write_request(&mut self, cluster_number: u64, block: Block);
 }
 
 // -------------
 // NEUTRON-LIKE
 // -------------
 
-pub struct NeutronDriver<'a> {
-    read_queue: ReadQueue<'a>,
+pub struct NeutronDriver {
+    read_queue: ReadQueue,
     write_queue: WriteQueue,
 }
 
-impl<'a> BlockDriver<'a> for NeutronDriver<'a> {
-    fn push_read_request(
-        &mut self,
-        buf: &'a mut [u8],
-        cluster_number: u64,
-        complete: Arc<AtomicBool>,
-    ) {
-        self.read_queue.push(buf, cluster_number, complete);
+impl BlockDriver for NeutronDriver {
+    fn push_read_request(&mut self, buf: &mut [u8], cluster_number: u64) {
+        self.read_queue.push(buf, cluster_number);
     }
 
-    fn push_write_request(&mut self, cluster_number: u64, block: Block, complete: Arc<AtomicBool>) {
-        self.write_queue.push(cluster_number, block, complete);
+    fn push_write_request(&mut self, cluster_number: u64, block: Block) {
+        self.write_queue.push(cluster_number, block);
     }
 }

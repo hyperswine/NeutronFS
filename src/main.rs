@@ -12,19 +12,22 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 
+pub mod cli;
+
 type Responder<T> = oneshot::Sender<T>;
 
 #[derive(Debug)]
 enum DiskRequest {
-    Read { block_id: u64, resp: Responder<Bytes>, },
-    Write { block_id: u64, block: Bytes, resp: Responder<()>, },
+    Read {
+        block_id: u64,
+        resp: Responder<Bytes>,
+    },
+    Write {
+        block_id: u64,
+        block: Bytes,
+        resp: Responder<()>,
+    },
 }
-
-// #[derive(Debug)]
-// enum DiskReponse {
-//     Read { block: Option<Bytes> },
-//     Write { success: bool },
-// }
 
 #[tokio::main]
 async fn main() {
@@ -35,7 +38,12 @@ async fn main() {
         let (resp_tx, resp_rx) = oneshot::channel();
 
         // send a disk request to read
-        tx.send(DiskRequest::Read { block_id: 0, resp: resp_tx }).await.unwrap();
+        tx.send(DiskRequest::Read {
+            block_id: 0,
+            resp: resp_tx,
+        })
+        .await
+        .unwrap();
 
         let res = resp_rx.await;
 
@@ -51,7 +59,11 @@ async fn main() {
                     let res = Bytes::from("RANDOM JUNK");
                     let _ = resp.send(res);
                 }
-                DiskRequest::Write { block_id, block, resp } => {}
+                DiskRequest::Write {
+                    block_id,
+                    block,
+                    resp,
+                } => {}
             }
         }
     });
@@ -62,39 +74,21 @@ async fn main() {
 
 fn simulate() -> ! {
     let mut blocks: Vec<Block> = vec![[0 as u8; 4096]; 100];
-    let mut read_queue: Mutex<ReadQueue> = Mutex::new(ReadQueue::new(vec![]));
-    let mut write_queue: Mutex<WriteQueue> = Mutex::new(WriteQueue::new(vec![]));
-    let mut vpartition: VPartition = VPartition::new(100, blocks, read_queue, write_queue);
-    let mut partition = Arc::new(Mutex::new(vpartition));
+    // let mut read_queue: ReadQueue = ReadQueue::new(vec![]);
+    // let mut write_queue: WriteQueue = WriteQueue::new(vec![]);
+    // let mut vpartition: VPartition = VPartition::new(100, blocks, read_queue, write_queue);
+    // let mut partition = Arc::new(vpartition);
 
-    println!(
-        "created a virtual partition of 100 blocks. Partition = {:?}",
-        partition
-    );
+    // println!(
+    //     "created a virtual partition of 100 blocks. Partition = {:?}",
+    //     partition
+    // );
 
     // let mut buf = Vec::with_capacity(4096);
     static mut buf: [u8; 4096] = [0 as u8; 4096];
     let cluster_number = 1;
 
-    // make a write request
-
-    // make another write request
-
-    // print out results
-    // NOTE: could also busy wait for flag = true for a specific request
-
-    // kernel idle loop
     loop {}
-}
-
-fn get_help_message() -> String {
-    "
-    cli
-        -r <file> \t[read a file]
-        -b        \t[build a struct]
-        -o <file> \t[output an in memory struct to a file]
-    "
-    .to_string()
 }
 
 // -------------
@@ -105,16 +99,16 @@ fn get_help_message() -> String {
 pub struct VPartition {
     n_blocks: u64,
     blocks: Vec<Block>,
-    read_queue: Mutex<ReadQueue<'static>>,
-    write_queue: Mutex<WriteQueue>,
+    read_queue: ReadQueue,
+    write_queue: WriteQueue,
 }
 
 impl VPartition {
     pub fn new(
         n_blocks: u64,
         blocks: Vec<Block>,
-        read_queue: Mutex<ReadQueue<'static>>,
-        write_queue: Mutex<WriteQueue>,
+        read_queue: ReadQueue,
+        write_queue: WriteQueue,
     ) -> Self {
         Self {
             n_blocks,
@@ -124,20 +118,9 @@ impl VPartition {
         }
     }
 
-    pub fn handle_requests(&mut self) {}
+    pub fn push_read_request(&mut self, cluster_number: u64) {}
 
-    fn push_write_request(&mut self, cluster_number: u64, block: Block, complete: Arc<AtomicBool>) {
-        loop {
-            let mut lock = self.write_queue.try_lock();
-            if let Ok(ref mut mutex) = lock {
-                mutex.push(cluster_number, block, complete);
-                break;
-            } else {
-                println!("lock is being used, trying again in 0.1 sec...");
-                thread::sleep(time::Duration::from_millis(10));
-            }
-        }
-    }
+    fn push_write_request(&mut self, cluster_number: u64, block_to_write: Block) {}
 }
 
 // -------------

@@ -8,38 +8,6 @@ Example fs in example_fs. If single user, then /home is the only home
 If "multiuser", other homes are in /home/guest/<name>
 */
 
-/*
-NeutronFS B (neutron skiplist fs)
-
-Assumes:
-- a relatively fast secondary storage drive with sector size == page size (4K)
-- pretty fast random reads, no seek time
-
-Design:
-Superblock => stores an offset to every other substructure
-
-Free List => fixed LIFO list of free sectors
-
-Root List => stores an index to the main fs list
-
-Kernel Bookkeeping:
-/sys/users => stores permissions for each user on the system. And their names and passwords. If enabled. By default, non existent. Can be used with software to determine whether a user can read/write a specific vnode number
-
-/sys/fs/rootfs_meta => TOML that stores extra metadata for the rootfs. A list of pairs of [inode: <times>, <etc>]. Used by `ls`. And usually a memory mapped file. The [free_inode] stores a list of free inodes LIFO. In a serialised state .serde or a readable state yml for quick viewing just in case
-
-File Handles:
-Instead of dealing with pointers and references, which can get messy, we address everything by their 'cluster number' or 'sector number'. Its P(1) to then go to that cluster
-
-The structs themselves dont know how that works, even in memory. In memory you basically map the entire fs tree aligned to page size
-
-Stack Based:
-Its hard to do a stack based in memory structure. So instead we dont. We use the heap and grow and shrink as needed, some overhead yes but at least we dont have to write it to the write_queue and jam the bus
-
-We can convert the heap based memory struct to a stack based one somehow. I think its possible since all nodes are the same size so we could pop one of them out and put a certain one in. And just reference the stack addr of it
-
-But the actual memory mapped data will def have to use a 'heap' like structure. Thats prob the bigger thing. Though very low latency file indexing is also good
-*/
-
 // -------------
 // API
 // -------------
@@ -90,8 +58,7 @@ pub type Checksum32 = u32;
 #[repr(align(4096))]
 pub struct Align4096<T>(T);
 
-/// Core metadata of the fs in memory
-/// On disk, uses a subset of these (implemented by method to_disk_format())
+/// Core metadata of the fs in memory. On disk, uses a subset of these (implemented by method to_disk_format())
 #[repr(C)]
 #[derive(Debug, Encode, Decode)]
 pub struct SuperBlock {
@@ -133,16 +100,13 @@ pub struct InternalNodeData {
 #[repr(C)]
 #[derive(Debug, Encode, Decode)]
 pub struct LeafNodeData {
-    // NOTE: always level 0
-    // next in the chain
+    // NOTE: always level 0. Next in the chain
     value: InodeNumber,
     cluster_number: ClusterNumber,
     next_node: ClusterNumber,
-    // actual data
+    // actual data location
     offset: u64,
-    // search the data skiplist for the nodes
-    // usually only MAX_DATA_NODES allowed
-    // each data skiplistnode
+    // search the data skiplist for the nodes. Usually only MAX_DATA_NODES allowed. Each data skiplistnode
     data_nodes: Vec<u64>,
 }
 
@@ -161,22 +125,15 @@ impl Inode {
         }
     }
 
-    /// Get a list of the cluster numbers of all associated data nodes
-    /// Uses a backend
+    /// Get a list of the cluster numbers of all associated data nodes. Uses a backend
     pub fn get_all_data_nodes(&self) -> Vec<ClusterData> {
         let res: Vec<ClusterData> = vec![];
 
-        // call block driver to find the nodes
-        // (or block driver backend) which simulates a file
+        // TODO: call block driver to find the nodes (or block driver backend) which simulates a file
 
         res
     }
 }
-
-// All a data node is is some reference to a contiguous sector of data
-// It stores the cluster number of that data (in the cluster data area)
-// And the cont size of that data
-// Its the lower level driver's job to find that cluster in the physical media and access its data in a safe way
 
 /// Each data node must refer to a cont block of allocated clusters
 #[repr(C)]
@@ -197,9 +154,7 @@ impl DataNode {
 
 type ClusterData = [u8; PAGE_SIZE as usize];
 
-/// Always adds LIFO (inserts at the front)
-/// could prob be very fragmented
-/// Maybe could also be a skip list
+/// Always adds LIFO (inserts at the front). Could prob be very fragmented. Maybe could also be a skip list
 #[repr(C)]
 #[derive(Debug, Encode, Decode)]
 pub struct FreeClusterNode {
@@ -220,11 +175,8 @@ impl FreeClusterNode {
 // INTERNAL API
 // -----------------
 
-/// Add an inode or data node to their respective trees
-/// Maybe just have methods for them. Though a lot of the logic is the same
+/// Add an inode or data node to their respective trees. Maybe just have methods for them. Though a lot of the logic is the same
 pub fn generate_level() {
-    // use mt. NOTE: some arm chips have a trustzone subsystem for generating random numbers
-    // riscv too. We'll need a driver for those to generate values
     // another way is to slice the 64-bit generated number up into 8 chunks and check each one %2 break if 0 right away or go next if all 8 are 1
     let mut mt = Mt19937GenRand64::new_unseeded();
     let mut level = 0;
@@ -248,27 +200,22 @@ pub fn generate_level() {
 // USER API
 // -----------------
 
-// NOTE: this doesnt handle any other fs. So you have a mounted QFS, that will actually call the QFS driver Readable/Writable trait impls
-// This uses the RAM module's internal structures
-// /dev/ should be mounted by udev
-
 impl Readable for Inode {
     fn read_all(&mut self) -> String {
         let res = String::from("");
 
-        // read all the data nodes
-        // NOTE: assuming memory is either cached in RAM
-        // if you need to, call the block driver to actually read from the SSD
+        // Read all the data nodes. NOTE: assuming memory is either cached in RAM
+        // If you need to, call the block driver to actually read from the SSD
 
         res
     }
 
     fn read_at(&mut self, buf: &mut [u8], offset: u64) -> Result<usize, &'static str> {
-        // read into buf of len() bytes
+        // Read into buf of len() bytes
         let bytes_to_read = buf.len();
 
-        // for this inode, find the data nodes that overlap the offset + len
-        // if file too small, just read as much as you can. Should return >= 0
+        // For this inode, find the data nodes that overlap the offset + len
+        // If file too small, just read as much as you can. Should return >= 0
         // Usually shouldnt be an error, except if the file is protected or something. Maybe the file on disk is bad
 
         todo!()

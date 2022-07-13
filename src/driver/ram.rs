@@ -3,6 +3,7 @@
 // -------------
 
 // On NeFS, we dont care about file extensions
+// I also dont see why we dont just store the file's data on the heap / shared memory and CoW
 
 use alloc::{borrow::Cow, string::String, vec::Vec};
 
@@ -16,8 +17,6 @@ pub enum FileEncoding {
     /// "raw" = bytes of whatever kind of encoding
     Raw,
 }
-
-// I dont see why we dont just store the file's data on the heap / shared memory and CoW
 
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -39,7 +38,7 @@ pub struct DirData {
 }
 
 impl DirData {
-    pub fn new_dir(name: String, files: Vec<NeFSFile>, parent: *mut DirData) -> Self {
+    pub fn new_dir(&mut self, name: String, files: Vec<NeFSFile>, parent: *mut DirData) -> Self {
         Self {
             name,
             files,
@@ -48,8 +47,10 @@ impl DirData {
     }
 
     // add a file
+    pub fn add_file(&mut self) {}
 
     // remove a file
+    pub fn remove_file(&mut self) {}
 }
 
 #[repr(C)]
@@ -66,25 +67,12 @@ pub enum NeFSFile {
 }
 
 impl NeFSFile {
-    // rename
     pub fn rename(&mut self) {}
 }
 
 pub struct NeFSFileCoW<'file>(Cow<'file, NeFSFile>);
 
-/*
-/
-    .
-    ..
-    sys/
-    dev/
-*/
-
 pub struct RootFS {}
 
-// -------------
-// NEUTRONFS RAM STRUCTURES
-// -------------
-
-// skiplists and such?
-// actually that would be a pretty bad idea compared to the usual tree
+// NOTE: VFS = NeFS in memory
+// skiplists and such? Maybe that specific skip-b-list
