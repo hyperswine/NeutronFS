@@ -12,43 +12,52 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 
-type Responder<T> = oneshot::Sender<Result<T, &'static str>>;
+type Responder<T> = oneshot::Sender<T>;
 
 #[derive(Debug)]
 enum DiskRequest {
-    Get { key: String },
-    Set { key: String, val: Bytes },
+    Read { block_id: u64, resp: Responder<Bytes>, },
+    Write { block_id: u64, block: Bytes, resp: Responder<()>, },
 }
 
-#[derive(Debug)]
-enum DiskReponse {
-    Get {
-        key: String,
-        resp: Responder<Option<Bytes>>,
-    },
-    Set {
-        key: String,
-        val: Bytes,
-        resp: Responder<()>,
-    },
-}
+// #[derive(Debug)]
+// enum DiskReponse {
+//     Read { block: Option<Bytes> },
+//     Write { success: bool },
+// }
 
 #[tokio::main]
 async fn main() {
     let (tx, mut rx) = mpsc::channel(64);
 
     // spawn tokio and move tx and push a read/write request
-    let req_read = tokio::spawn(async move {});
+    let req_read = tokio::spawn(async move {
+        let (resp_tx, resp_rx) = oneshot::channel();
+
+        // send a disk request to read
+        tx.send(DiskRequest::Read { block_id: 0, resp: resp_tx }).await.unwrap();
+
+        let res = resp_rx.await;
+
+        println!("res = {:?}", res.unwrap());
+    });
 
     let manager = tokio::spawn(async move {
-        // Start receiving messages
+        // Start receiving requests
         while let Some(cmd) = rx.recv().await {
             match cmd {
-                DiskRequest::Get { key } => {}
-                DiskRequest::Set { key, val } => {}
+                DiskRequest::Read { block_id, resp } => {
+                    // handle the read request by searching the block and wrapping it in a DiskResponse
+                    let res = Bytes::from("RANDOM JUNK");
+                    let _ = resp.send(res);
+                }
+                DiskRequest::Write { block_id, block, resp } => {}
             }
         }
     });
+
+    req_read.await.unwrap();
+    manager.await.unwrap();
 }
 
 fn simulate() -> ! {
