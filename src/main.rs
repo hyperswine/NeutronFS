@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use core::task;
 use neutron_fs::driver::block::{Block, BlockDriver, ReadQueue, WriteQueue};
 use std::cell::RefCell;
@@ -7,12 +8,48 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::{fs::File, ptr::null};
 use std::{thread, time};
-use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::sync::{mpsc, oneshot};
+
+type Responder<T> = oneshot::Sender<Result<T, &'static str>>;
+
+#[derive(Debug)]
+enum DiskRequest {
+    Get { key: String },
+    Set { key: String, val: Bytes },
+}
+
+#[derive(Debug)]
+enum DiskReponse {
+    Get {
+        key: String,
+        resp: Responder<Option<Bytes>>,
+    },
+    Set {
+        key: String,
+        val: Bytes,
+        resp: Responder<()>,
+    },
+}
 
 #[tokio::main]
 async fn main() {
-    
+    let (tx, mut rx) = mpsc::channel(64);
+
+    let manager = tokio::spawn(async move {
+        // Start receiving messages
+        while let Some(cmd) = rx.recv().await {
+            match cmd {
+                DiskRequest::Get { key } => {
+                    client.get(&key).await;
+                }
+                DiskRequest::Set { key, val } => {
+                    client.set(&key, val).await;
+                }
+            }
+        }
+    });
 }
 
 fn simulate() -> ! {
@@ -46,7 +83,6 @@ fn simulate() -> ! {
     t.join().expect("The listener thread panicked");
 
     // make read request
-    // ? why doesnt it work? I have it on Arc
     let read_req = thread::spawn(move || unsafe {
         loop {
             // try lock
@@ -109,94 +145,7 @@ impl VPartition {
     }
 
     pub fn handle_requests(&mut self) {
-        let mut file = File::create("output.txt").unwrap();
-        file.write(b"This is an output");
-
-        println!("In handler function!");
-        loop {
-            println!("In loop!!");
-
-            // check read requests
-            let mut lock = self.read_queue.try_lock();
-            if let Ok(ref mut mutex) = lock {
-                let read_queue = mutex.deref_mut();
-                let block_number = read_queue.pop();
-                match block_number {
-                    Some(b) => {
-                        println!("Read request for block number: {}", b.0);
-                        let blck = b.0;
-                        let res = self.blocks.get(blck as usize);
-                        match res {
-                            Some(r) => {
-                                b.1.copy_from_slice(r);
-                                // you can actually continue from read_queue.pop() again until theres no more read req
-                                // but that might starve the write reqs
-
-                                // DEBUG: copy the bytes out to file
-                                file.write(b.1);
-                            }
-                            None => {
-                                println!("BLOCK NUMBER INVALID... PANICKING");
-                                panic!("Panicked thread");
-                            }
-                        }
-                    }
-                    None => println!("No pending reads, checking write"),
-                }
-            } else {
-                println!("read lock is being used, trying write...");
-            }
-            // check write requests
-            if let Ok(ref mut mutex) = self.write_queue.try_lock() {
-                // write the block to RAM -> can just move it because you dont need it anymore
-                let write_queue = mutex.deref_mut();
-                let block_to_write = write_queue.pop();
-                match block_to_write {
-                    Some(btw) => {
-                        match self.blocks.get_mut(btw.0 as usize) {
-                            Some(b) => {
-                                // move it instead. I think you can use move from data or std::mem::move
-                                b.copy_from_slice(&btw.1);
-                            }
-                            None => todo!(),
-                        }
-                    }
-                    None => {
-                        println!("No pending writes");
-                    }
-                }
-            } else {
-                println!("write lock is being used... nothing to do");
-            }
-
-            println!("Iteration done. Continuing again in 0.3 sec...");
-            thread::sleep(time::Duration::from_millis(30));
-        }
-    }
-}
-
-impl<'a> BlockDriver<'a> for VPartition {
-    // calls wake() on handle_requests thread
-    fn push_read_request(
-        &mut self,
-        buf: &'a mut [u8],
-        cluster_number: u64,
-        complete: Arc<AtomicBool>,
-    ) {
-        loop {
-            let mut lock = self.read_queue.try_lock();
-            if let Ok(ref mut mutex) = lock {
-                mutex.push(buf, cluster_number, complete);
-                break;
-            } else {
-                println!("lock is being used, trying again in 0.1 sec...");
-                thread::sleep(time::Duration::from_millis(10));
-            }
-        }
-        // either sleep here until handler signals this thread
-        // or pass a buf
-
-        // self.read_queue.push(cluster_number);
+        
     }
 
     fn push_write_request(&mut self, cluster_number: u64, block: Block, complete: Arc<AtomicBool>) {
