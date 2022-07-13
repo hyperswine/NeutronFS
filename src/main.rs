@@ -37,16 +37,15 @@ enum DiskReponse {
 async fn main() {
     let (tx, mut rx) = mpsc::channel(64);
 
+    // spawn tokio and move tx and push a read/write request
+    let req_read = tokio::spawn(async move {});
+
     let manager = tokio::spawn(async move {
         // Start receiving messages
         while let Some(cmd) = rx.recv().await {
             match cmd {
-                DiskRequest::Get { key } => {
-                    client.get(&key).await;
-                }
-                DiskRequest::Set { key, val } => {
-                    client.set(&key, val).await;
-                }
+                DiskRequest::Get { key } => {}
+                DiskRequest::Set { key, val } => {}
             }
         }
     });
@@ -67,34 +66,6 @@ fn simulate() -> ! {
     // let mut buf = Vec::with_capacity(4096);
     static mut buf: [u8; 4096] = [0 as u8; 4096];
     let cluster_number = 1;
-
-    let t = thread::spawn(move || {
-        unsafe {
-            loop {
-                // try lock
-                let mut lock = partition.try_lock();
-                if let Ok(ref mut mutex) = lock {
-                    let part = mutex.deref_mut();
-                    part.handle_requests();
-                }
-            }
-        }
-    });
-    t.join().expect("The listener thread panicked");
-
-    // make read request
-    let read_req = thread::spawn(move || unsafe {
-        loop {
-            // try lock
-            let mut lock = partition.try_lock();
-            let mut complete: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-            if let Ok(ref mut mutex) = lock {
-                let part = mutex.deref_mut();
-                part.push_read_request(&mut buf, cluster_number, complete);
-            }
-        }
-    });
-    read_req.join().expect("Request made");
 
     // make a write request
 
@@ -144,9 +115,7 @@ impl VPartition {
         }
     }
 
-    pub fn handle_requests(&mut self) {
-        
-    }
+    pub fn handle_requests(&mut self) {}
 
     fn push_write_request(&mut self, cluster_number: u64, block: Block, complete: Arc<AtomicBool>) {
         loop {
