@@ -2,7 +2,7 @@
 // IMPORTS
 // -----------------
 
-use neutron_fs::driver::block::{Block, BlockDriver, make_block};
+use neutron_fs::driver::block::{make_block, Block, BlockDriver};
 use tokio::{
     sync::{
         mpsc::{self},
@@ -100,8 +100,20 @@ impl VPartition {
     }
 
     pub fn new_empty(n_blocks: u64) -> Self {
-        let mut blocks_zeroed: Vec<Block> = vec![];
-        blocks_zeroed.reserve(n_blocks as usize);
+        let mut blocks = Vec::<Block>::new();
+        blocks.reserve(n_blocks as usize);
+
+        Self {
+            n_blocks,
+            blocks: blocks,
+        }
+    }
+
+    pub fn new_zeroed(n_blocks: u64) -> Self {
+        let mut blocks_zeroed = Vec::<Block>::new();
+        blocks_zeroed.iter_mut().for_each(|b| {
+            *b = make_block();
+        });
 
         Self {
             n_blocks,
