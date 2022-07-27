@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use core::task;
-use neutron_fs::driver::block::{Block, BlockDriver, ReadQueue, WriteQueue};
+use neutron_fs::driver::block::{make_block, Block, BlockDriver, ReadQueue, WriteQueue};
 use std::cell::RefCell;
 use std::io::Write;
 use std::ops::DerefMut;
@@ -20,20 +20,48 @@ type Responder<T> = oneshot::Sender<T>;
 enum DiskRequest {
     Read {
         block_id: u64,
-        resp: Responder<Bytes>,
+        resp: Responder<Block>,
     },
     Write {
         block_id: u64,
-        block: Bytes,
+        block: Block,
         resp: Responder<()>,
     },
 }
 
 #[tokio::main]
 async fn main() {
+    let mut v_partition = VPartition::new_empty();
+
+    // wait.. so maybe I dont need a read queue/ write queue? like not per se
+    // since its already queued
+
     let (tx, mut rx) = mpsc::channel(64);
+    // let (wtx, mut wrx) = mpsc::channel(64);
+
+    let manager = tokio::spawn(async move {
+        // Start receiving requests
+        while let Some(cmd) = rx.recv().await {
+            match cmd {
+                DiskRequest::Read { block_id, resp } => {
+                    // handle the read request by searching the block and wrapping it in a DiskResponse
+                    let block = v_partition.get_block(block_id);
+                    let _ = resp.send(block);
+                }
+                DiskRequest::Write {
+                    block_id,
+                    block,
+                    resp,
+                } => {
+                    let block = v_partition.write_block(block_id, block);
+                    let _ = resp.send(block);
+                }
+            }
+        }
+    });
 
     // spawn tokio and move tx and push a read/write request
+    // in practice, would be calling a function that does this, which spawns a tokio thread
     let req_read = tokio::spawn(async move {
         let (resp_tx, resp_rx) = oneshot::channel();
 
@@ -47,48 +75,47 @@ async fn main() {
 
         let res = resp_rx.await;
 
-        println!("res = {:?}", res.unwrap());
-    });
+        println!("read res = {:?}", res.unwrap());
 
-    let manager = tokio::spawn(async move {
-        // Start receiving requests
-        while let Some(cmd) = rx.recv().await {
-            match cmd {
-                DiskRequest::Read { block_id, resp } => {
-                    // handle the read request by searching the block and wrapping it in a DiskResponse
-                    let res = Bytes::from("RANDOM JUNK");
-                    let _ = resp.send(res);
-                }
-                DiskRequest::Write {
-                    block_id,
-                    block,
-                    resp,
-                } => {}
-            }
-        }
-    });
+        // WRITE REQ
+        let (resp_tx, resp_rx) = oneshot::channel();
 
+        let new_block = [1; 4096];
+
+        // send a write req through tx..? why doesnt it work
+        tx.send(DiskRequest::Write {
+            block_id: 0,
+            block: new_block,
+            resp: resp_tx,
+        })
+        .await
+        .unwrap();
+
+        let res = resp_rx.await;
+
+        println!("write res = {:?}", res.unwrap());
+
+        let (resp_tx, resp_rx) = oneshot::channel();
+
+        // send a disk request to read
+        tx.send(DiskRequest::Read {
+            block_id: 0,
+            resp: resp_tx,
+        })
+        .await
+        .unwrap();
+
+        let res = resp_rx.await;
+
+        println!("read res = {:?}", res.unwrap());
+    });
+    
     req_read.await.unwrap();
+
+    // read again..
+    // Hopefully the write is done before the read? Oh we can just join before hand
+
     manager.await.unwrap();
-}
-
-fn simulate() -> ! {
-    let mut blocks: Vec<Block> = vec![[0 as u8; 4096]; 100];
-    // let mut read_queue: ReadQueue = ReadQueue::new(vec![]);
-    // let mut write_queue: WriteQueue = WriteQueue::new(vec![]);
-    // let mut vpartition: VPartition = VPartition::new(100, blocks, read_queue, write_queue);
-    // let mut partition = Arc::new(vpartition);
-
-    // println!(
-    //     "created a virtual partition of 100 blocks. Partition = {:?}",
-    //     partition
-    // );
-
-    // let mut buf = Vec::with_capacity(4096);
-    static mut buf: [u8; 4096] = [0 as u8; 4096];
-    let cluster_number = 1;
-
-    loop {}
 }
 
 // -------------
@@ -99,28 +126,29 @@ fn simulate() -> ! {
 pub struct VPartition {
     n_blocks: u64,
     blocks: Vec<Block>,
-    read_queue: ReadQueue,
-    write_queue: WriteQueue,
 }
 
 impl VPartition {
-    pub fn new(
-        n_blocks: u64,
-        blocks: Vec<Block>,
-        read_queue: ReadQueue,
-        write_queue: WriteQueue,
-    ) -> Self {
+    pub fn new(n_blocks: u64, blocks: Vec<Block>) -> Self {
+        Self { n_blocks, blocks }
+    }
+
+    pub fn new_empty() -> Self {
+        let blocks_zeroed: Vec<Block> = vec![make_block(); 1000];
+
         Self {
-            n_blocks,
-            blocks,
-            read_queue,
-            write_queue,
+            n_blocks: 1000,
+            blocks: blocks_zeroed,
         }
     }
 
-    pub fn push_read_request(&mut self, cluster_number: u64) {}
+    pub fn get_block(&mut self, block_id: u64) -> Block {
+        self.blocks.get(block_id as usize).unwrap().clone()
+    }
 
-    fn push_write_request(&mut self, cluster_number: u64, block_to_write: Block) {}
+    pub fn write_block(&mut self, block_id: u64, block: Block) {
+        self.blocks[block_id as usize] = block;
+    }
 }
 
 // -------------

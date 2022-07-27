@@ -13,6 +13,13 @@ pub fn make_block() -> Block {
     res
 }
 
+// I DUNNO IF WE NEED THESE STRUCTS
+// maybe for an actual driver. Keep for now as an interface
+// For the actual block driver in kernelspace
+// It has to DMA the req to the SSD. Then the SSD DMA's the block back to the requested memory
+// And sends an interrupt to the cpu global line. Then one of the cores handles the specific interrupt number
+// (IO_fin, io_id) for io completed. Which searches the pending requests (after popped from queue), and finds the req with that io_id, and the kthread associated with that (?) or maybe the uthread with that. But the kthread resumes and returns to that uthread. Given the scheduler or another interrupt doesnt interrupt it!!
+
 // -------------
 // BLOCK DRIVER
 // -------------
@@ -33,6 +40,18 @@ impl<T: Clone, const SIZE: usize> RingBuffer<T, SIZE> {
             n_elements,
             max_size,
             buffer,
+        }
+    }
+
+    pub fn new_cluster_queue(buf: [T; SIZE]) -> Self {
+        // let  = [(0, [0 as u8; 4096]); SIZE];
+        // for each elem, increment the cluster number? Nah its a request queue
+
+        Self {
+            curr_head: 0,
+            n_elements: 0,
+            max_size: SIZE,
+            buffer: buf,
         }
     }
 
@@ -74,9 +93,16 @@ impl WriteQueue {
         Self { queue }
     }
 
+    pub fn new_empty() -> Self {
+        // uhh ok
+        let ringbuffer = RingBuffer::new_cluster_queue([(0, [0 as u8; 4096]); MAX_QUEUE_SIZE]);
+        Self { queue: ringbuffer }
+    }
+
     pub fn push(&mut self, cluster_number: ClusterNumber, block: Block) {
         self.queue.push((cluster_number, block));
     }
+
     pub fn pop(&mut self) -> Option<(ClusterNumber, Block)> {
         Some(self.queue.pop())
     }
@@ -87,11 +113,18 @@ impl ReadQueue {
         Self { queue }
     }
 
+    pub fn new_empty() -> Self {
+        // uhh ok
+        let ringbuffer = RingBuffer::new_cluster_queue([(0, [0 as u8; 4096]); MAX_QUEUE_SIZE]);
+        Self { queue: ringbuffer }
+    }
+
     pub fn push(&mut self, buf: &mut [u8], cluster_number: ClusterNumber) {
         let mut new_buf: Block = make_block();
         new_buf.copy_from_slice(&buf[..4095]);
         self.queue.push((cluster_number, new_buf));
     }
+
     pub fn pop(&mut self) -> Option<(ClusterNumber, Block)> {
         Some(self.queue.pop())
     }
