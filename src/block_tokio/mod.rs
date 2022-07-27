@@ -2,6 +2,7 @@
 // IMPORTS
 // -----------------
 
+use log::info;
 use neutron_fs::driver::block::{make_block, Block, BlockDriver};
 use tokio::{
     sync::{
@@ -34,23 +35,32 @@ pub enum DiskRequest {
 // TOKIO DRIVER
 // -----------------
 
+// store tx, rx??
+
 /// Expose to the actual higher driver
 pub struct BlockDriverTokio {
     vpartition: VPartition,
+    tx_channel: mpsc::Sender<DiskRequest>,
+    rx_channel: mpsc::Receiver<DiskRequest>,
 }
 
 impl BlockDriverTokio {
-    pub fn new(vpartition: VPartition) -> Self {
-        Self { vpartition }
+    pub fn new(
+        vpartition: VPartition,
+        tx_channel: mpsc::Sender<DiskRequest>,
+        rx_channel: mpsc::Receiver<DiskRequest>,
+    ) -> Self {
+        Self {
+            vpartition,
+            tx_channel,
+            rx_channel,
+        }
     }
 
-    pub fn init_manager(
-        mut self,
-        mut rx: mpsc::Receiver<DiskRequest>,
-    ) -> JoinHandle<BlockDriverTokio> {
+    pub fn init_manager(mut self) -> JoinHandle<BlockDriverTokio> {
         let manager = tokio::spawn(async move {
             // Start receiving and handling requests. Maybe give it away after? IDK
-            while let Some(cmd) = rx.recv().await {
+            while let Some(cmd) = self.rx_channel.recv().await {
                 match cmd {
                     DiskRequest::Read { block_id, resp } => {
                         // handle the read request by searching the block and wrapping it in a DiskResponse
@@ -74,12 +84,33 @@ impl BlockDriverTokio {
     }
 }
 
+// USE ARC! core::arc??
+// uhhh
+
 impl BlockDriver for BlockDriverTokio {
     fn push_read_request(&mut self, buf: &mut [u8], cluster_number: u64) {
-        todo!()
+        let req_read = tokio::spawn(async move {
+            info!("Sending read request on separate thread...");
+
+            let (resp_tx, resp_rx) = oneshot::channel();
+
+            // send a disk request to read
+            self.tx_channel
+                .send(DiskRequest::Read {
+                    block_id: 0,
+                    resp: resp_tx,
+                })
+                .await
+                .unwrap();
+
+            let res = resp_rx.await;
+
+            info!("Read request complete!\nResult = {:?}", res.unwrap());
+        });
+
     }
 
-    fn push_write_request(&mut self, cluster_number: u64, block: Block) {
+    fn push_write_request(mut self, cluster_number: u64, block: Block) {
         todo!()
     }
 }
