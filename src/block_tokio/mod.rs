@@ -1,3 +1,7 @@
+// -----------------
+// IMPORTS
+// -----------------
+
 use neutron_fs::driver::block::{Block, BlockDriver, make_block};
 use tokio::{
     sync::{
@@ -6,6 +10,10 @@ use tokio::{
     },
     task::JoinHandle,
 };
+
+// -----------------
+// DEFINITIONS
+// -----------------
 
 type Responder<T> = oneshot::Sender<T>;
 
@@ -21,6 +29,10 @@ pub enum DiskRequest {
         resp: Responder<()>,
     },
 }
+
+// -----------------
+// TOKIO DRIVER
+// -----------------
 
 /// Expose to the actual higher driver
 pub struct BlockDriverTokio {
@@ -72,9 +84,9 @@ impl BlockDriver for BlockDriverTokio {
     }
 }
 
-// -------------
+// -----------------
 // VIRTUAL PARTITION
-// -------------
+// -----------------
 
 #[derive(Debug)]
 pub struct VPartition {
@@ -87,13 +99,18 @@ impl VPartition {
         Self { n_blocks, blocks }
     }
 
-    pub fn new_empty() -> Self {
-        let blocks_zeroed: Vec<Block> = vec![make_block(); 1000];
+    pub fn new_empty(n_blocks: u64) -> Self {
+        let mut blocks_zeroed: Vec<Block> = vec![];
+        blocks_zeroed.reserve(n_blocks as usize);
 
         Self {
-            n_blocks: 1000,
+            n_blocks,
             blocks: blocks_zeroed,
         }
+    }
+
+    pub fn max_size(&self) -> u64 {
+        self.n_blocks
     }
 
     pub fn get_block(&mut self, block_id: u64) -> Block {
