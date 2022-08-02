@@ -1,7 +1,7 @@
 use bytes::Bytes;
-use simple_block::SimpleBlockDriver;
 use core::task;
 use neutron_fs::driver::block::{make_block, Block, BlockDriver, ReadQueue, WriteQueue};
+use simple_block::SimpleBlockDriver;
 use std::cell::RefCell;
 use std::io::Write;
 use std::ops::DerefMut;
@@ -15,19 +15,17 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-pub mod simple_block;
 pub mod block_tokio;
 pub mod cli;
 pub mod client_server;
+pub mod simple_block;
 
 #[tokio::main]
 async fn main() {
     // simulate a block driver
-    let simple_block_driver = SimpleBlockDriver::new([make_block(); 1000]);
+    let simple_block_driver = SimpleBlockDriver::new([make_block(); 1000], 0);
 
     // create an EFI partition using the simple block driver
-
-    // 
 }
 
 // -------------
