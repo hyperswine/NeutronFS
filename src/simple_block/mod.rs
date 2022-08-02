@@ -1,8 +1,6 @@
 use neutron_fs::driver::block::{Block, BlockDriver};
-use tokio::io::copy_buf;
 
-/// A simple block driver that blocks on requests
-
+/// A simple block driver that blocks on requests until done. No multithreading
 pub struct SimpleBlockDriver {
     clusters: [Block; 1000],
     curr_gpt_entries: usize,
@@ -36,6 +34,16 @@ impl GPTEntry {
             flags,
             name,
         }
+    }
+
+    /// MAKE SURE NAME IS EXACTLY 36 CHARACTERS
+    pub fn set_name(&mut self, new_name: String) {
+        let name: Vec<u16> = new_name.encode_utf16().collect();
+        self.name.copy_from_slice(&name);
+    }
+
+    pub fn get_name(&self) -> String {
+        String::from_utf16(&self.name).unwrap()
     }
 }
 
