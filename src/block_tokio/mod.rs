@@ -87,33 +87,33 @@ impl BlockDriverTokio {
 // USE ARC! core::arc??
 // uhhh
 
-impl BlockDriver for BlockDriverTokio {
-    fn push_read_request(&mut self, buf: &mut [u8], cluster_number: u64) {
-        let req_read = tokio::spawn(async move {
-            info!("Sending read request on separate thread...");
+// impl BlockDriver for BlockDriverTokio {
+//     fn push_read_request(&mut self, buf: &mut [u8], cluster_number: u64) {
+//         let req_read = tokio::spawn(async move {
+//             info!("Sending read request on separate thread...");
 
-            let (resp_tx, resp_rx) = oneshot::channel();
+//             let (resp_tx, resp_rx) = oneshot::channel();
 
-            // send a disk request to read
-            self.tx_channel
-                .send(DiskRequest::Read {
-                    block_id: 0,
-                    resp: resp_tx,
-                })
-                .await
-                .unwrap();
+//             // send a disk request to read
+//             self.tx_channel
+//                 .send(DiskRequest::Read {
+//                     block_id: 0,
+//                     resp: resp_tx,
+//                 })
+//                 .await
+//                 .unwrap();
 
-            let res = resp_rx.await;
+//             let res = resp_rx.await;
 
-            info!("Read request complete!\nResult = {:?}", res.unwrap());
-        });
+//             info!("Read request complete!\nResult = {:?}", res.unwrap());
+//         });
 
-    }
+//     }
 
-    fn push_write_request(mut self, cluster_number: u64, block: Block) {
-        todo!()
-    }
-}
+//     fn push_write_request(mut self, cluster_number: u64, block: Block) {
+//         todo!()
+//     }
+// }
 
 // -----------------
 // VIRTUAL PARTITION
