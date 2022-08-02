@@ -2,7 +2,7 @@
 
 use core::sync::atomic::AtomicBool;
 
-use super::{ClusterData, ClusterNumber, PAGE_SIZE};
+use super::neutronfs::{ClusterData, ClusterNumber, PAGE_SIZE};
 use alloc::{borrow::ToOwned, sync::Arc, vec::Vec};
 use bytes::Bytes;
 
